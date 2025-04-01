@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">CUChat</string>
+    <string name="default_notification_channel_id">cuchat_channel</string>
+</resources>
