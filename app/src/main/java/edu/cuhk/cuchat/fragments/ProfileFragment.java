@@ -171,4 +171,30 @@ public class ProfileFragment extends Fragment {
             // For brevity, I've omitted the image upload code here
         }
     }
+
+    private void logoutUser() {
+        // Mark user as offline in Firestore
+        if (currentUser != null) {
+            FirebaseFirestore.getInstance().collection("users")
+                    .document(currentUser.getUid())
+                    .update("isOnline", false,
+                            "lastSeen", System.currentTimeMillis());
+
+            // Also mark in Realtime Database
+            FirebaseDatabase.getInstance().getReference()
+                    .child("status").child(currentUser.getUid())
+                    .setValue("offline");
+        }
+
+        // Stop the status service
+        stopService(new Intent(this, UserStatusService.class));
+
+        // Sign out from Firebase
+        mAuth.signOut();
+
+        // Navigate to login screen
+        startActivity(new Intent(this, LoginActivity.class));
+        finish();
+    }
+
 }

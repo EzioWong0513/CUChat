@@ -2,6 +2,7 @@ package edu.cuhk.cuchat;
 
 import android.os.Bundle;
 import android.text.TextUtils;
+import android.text.format.DateFormat;
 import android.util.Log;
 import android.view.MenuItem;
 import android.view.View;
@@ -20,24 +21,25 @@ import com.bumptech.glide.Glide;
 import com.google.firebase.auth.FirebaseAuth;
 import com.google.firebase.auth.FirebaseUser;
 import com.google.firebase.firestore.DocumentChange;
+import com.google.firebase.firestore.DocumentReference;
+import com.google.firebase.firestore.DocumentSnapshot;
 import com.google.firebase.firestore.EventListener;
 import com.google.firebase.firestore.FirebaseFirestore;
 import com.google.firebase.firestore.FirebaseFirestoreException;
+import com.google.firebase.firestore.ListenerRegistration;
 import com.google.firebase.firestore.Query;
 import com.google.firebase.firestore.QuerySnapshot;
+import com.google.firebase.firestore.SetOptions;
 
 import java.util.ArrayList;
+import java.util.Calendar;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 import de.hdodenhof.circleimageview.CircleImageView;
 import edu.cuhk.cuchat.adapters.MessagesAdapter;
-import edu.cuhk.cuchat.models.Chat;
 import edu.cuhk.cuchat.models.Message;
-import edu.cuhk.cuchat.models.User;
-
-import com.google.firebase.firestore.SetOptions;
 
 public class ChatActivity extends AppCompatActivity {
 
@@ -46,6 +48,7 @@ public class ChatActivity extends AppCompatActivity {
     private Toolbar toolbar;
     private CircleImageView ivUserProfilePic;
     private TextView tvUsername;
+    private TextView tvUserStatus; // Add this field to track the user status TextView
     private RecyclerView rvMessages;
     private EditText etMessage;
     private ImageButton btnSendMessage;
@@ -59,6 +62,8 @@ public class ChatActivity extends AppCompatActivity {
 
     private MessagesAdapter messagesAdapter;
     private List<Message> messageList;
+
+    private ListenerRegistration userStatusListener; // Add this to track the user status listener
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -89,6 +94,7 @@ public class ChatActivity extends AppCompatActivity {
 
         ivUserProfilePic = findViewById(R.id.ivUserProfilePic);
         tvUsername = findViewById(R.id.tvUsername);
+        tvUserStatus = findViewById(R.id.tvUserStatus); // Initialize the user status TextView
         rvMessages = findViewById(R.id.rvMessages);
         etMessage = findViewById(R.id.etMessage);
         btnSendMessage = findViewById(R.id.btnSendMessage);
@@ -125,6 +131,59 @@ public class ChatActivity extends AppCompatActivity {
 
         // Load messages
         loadMessages();
+
+        // Start listening for user status changes
+        listenForUserStatusChanges();
+    }
+
+    // Add this method to listen for user status changes
+    private void listenForUserStatusChanges() {
+        DocumentReference userRef = db.collection("users").document(chatUserId);
+
+        userStatusListener = userRef.addSnapshotListener(new EventListener<DocumentSnapshot>() {
+            @Override
+            public void onEvent(@Nullable DocumentSnapshot snapshot, @Nullable FirebaseFirestoreException e) {
+                if (e != null) {
+                    Log.w(TAG, "Listen failed.", e);
+                    return;
+                }
+
+                if (snapshot != null && snapshot.exists()) {
+                    // Check if user is online
+                    Boolean isOnline = snapshot.getBoolean("isOnline");
+                    String status = snapshot.getString("status");
+                    Long lastSeen = snapshot.getLong("lastSeen");
+
+                    // Update UI with status
+                    updateUserStatusUI(isOnline, status, lastSeen);
+                }
+            }
+        });
+    }
+
+    // Add this method to update the user status UI
+    private void updateUserStatusUI(Boolean isOnline, String status) {
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                if (tvUserStatus != null) {
+                    if (isOnline != null && isOnline) {
+                        tvUserStatus.setText("Online");
+                        // You could change the text color to green to indicate online status
+                        tvUserStatus.setTextColor(getResources().getColor(android.R.color.holo_green_dark));
+                    } else {
+                        // If user has a status, use it; otherwise show "Offline"
+                        if (status != null && !status.isEmpty()) {
+                            tvUserStatus.setText(status);
+                        } else {
+                            tvUserStatus.setText("Offline");
+                        }
+                        // Reset text color
+                        tvUserStatus.setTextColor(getResources().getColor(android.R.color.darker_gray));
+                    }
+                }
+            }
+        });
     }
 
     private void loadMessages() {
@@ -155,7 +214,9 @@ public class ChatActivity extends AppCompatActivity {
                         }
 
                         messagesAdapter.notifyDataSetChanged();
-                        rvMessages.scrollToPosition(messageList.size() - 1);
+                        if (messageList.size() > 0) {
+                            rvMessages.scrollToPosition(messageList.size() - 1);
+                        }
 
                         // Mark messages as seen if they are from the chat user
                         markMessagesAsSeen();
@@ -197,21 +258,18 @@ public class ChatActivity extends AppCompatActivity {
                     Log.d(TAG, "Message sent with ID: " + documentReference.getId());
                     etMessage.setText("");
 
-                    // Update chat summary
+                    // THIS LINE IS CRUCIAL - Make sure it's here and not commented out!
                     updateChatSummary(messageContent, timestamp);
 
-                    // Look up the receiver's FCM token to potentially send a notification
+                    // Look up the receiver's FCM token for notifications
                     db.collection("users").document(chatUserId)
                             .get()
                             .addOnSuccessListener(documentSnapshot -> {
                                 String receiverToken = documentSnapshot.getString("fcmToken");
                                 boolean isOnline = Boolean.TRUE.equals(documentSnapshot.getBoolean("isOnline"));
 
-                                // For demonstration - mark that we checked for notification
-                                // In a real implementation, you would send this from a server
+                                // Mark that we checked for notification
                                 documentReference.update("notificationSent", true);
-
-                                Log.d(TAG, "Receiver online status: " + isOnline + ", has token: " + (receiverToken != null));
                             });
                 })
                 .addOnFailureListener(e -> Log.w(TAG, "Error sending message", e));
@@ -294,6 +352,15 @@ public class ChatActivity extends AppCompatActivity {
         updateUserStatus(true);
     }
 
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        // Remove the user status listener to prevent memory leaks
+        if (userStatusListener != null) {
+            userStatusListener.remove();
+        }
+    }
+
     private void updateChatSeenStatus() {
         db.collection("chats").document(chatId)
                 .get()
@@ -321,4 +388,61 @@ public class ChatActivity extends AppCompatActivity {
                     .update("isOnline", isOnline);
         }
     }
+
+    private void updateUserStatusUI(Boolean isOnline, String status, Long lastSeen) {
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                if (tvUserStatus != null) {
+                    if (isOnline != null && isOnline) {
+                        tvUserStatus.setText("Online");
+                        tvUserStatus.setTextColor(getResources().getColor(android.R.color.holo_green_dark));
+                    } else {
+                        // Format last seen time if available
+                        if (lastSeen != null && lastSeen > 0) {
+                            String formattedTime = formatLastSeen(lastSeen);
+                            tvUserStatus.setText("Last seen " + formattedTime);
+                        } else if (status != null && !status.isEmpty()) {
+                            tvUserStatus.setText(status);
+                        } else {
+                            tvUserStatus.setText("Offline");
+                        }
+                        tvUserStatus.setTextColor(getResources().getColor(android.R.color.darker_gray));
+                    }
+                }
+            }
+        });
+    }
+
+    private String formatLastSeen(long lastSeen) {
+        long now = System.currentTimeMillis();
+        long diff = now - lastSeen;
+
+        // Less than a minute
+        if (diff < 60 * 1000) {
+            return "just now";
+        }
+        // Less than an hour
+        else if (diff < 60 * 60 * 1000) {
+            int minutes = (int) (diff / (60 * 1000));
+            return minutes + " minute" + (minutes > 1 ? "s" : "") + " ago";
+        }
+        // Less than a day
+        else if (diff < 24 * 60 * 60 * 1000) {
+            int hours = (int) (diff / (60 * 60 * 1000));
+            return hours + " hour" + (hours > 1 ? "s" : "") + " ago";
+        }
+        // Less than a week
+        else if (diff < 7 * 24 * 60 * 60 * 1000) {
+            int days = (int) (diff / (24 * 60 * 60 * 1000));
+            return days + " day" + (days > 1 ? "s" : "") + " ago";
+        }
+        // Format as date
+        else {
+            Calendar cal = Calendar.getInstance();
+            cal.setTimeInMillis(lastSeen);
+            return DateFormat.format("MMM d, yyyy", cal).toString();
+        }
+    }
+
 }

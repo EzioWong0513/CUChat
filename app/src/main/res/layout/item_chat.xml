@@ -22,13 +22,13 @@
         android:layout_width="12dp"
         android:layout_height="12dp"
         android:background="@drawable/circle_indicator_green"
-        android:visibility="visible"
-        app:layout_constraintBottom_toBottomOf="@+id/ivProfilePic"
-        app:layout_constraintEnd_toEndOf="@+id/ivProfilePic"
-        app:layout_constraintStart_toStartOf="@+id/ivProfilePic"
-        app:layout_constraintTop_toTopOf="@+id/ivProfilePic"
-        app:layout_constraintVertical_bias="0.9"
-        app:layout_constraintHorizontal_bias="0.9" />
+        android:visibility="gone"
+    app:layout_constraintBottom_toBottomOf="@+id/ivProfilePic"
+    app:layout_constraintEnd_toEndOf="@+id/ivProfilePic"
+    app:layout_constraintStart_toStartOf="@+id/ivProfilePic"
+    app:layout_constraintTop_toTopOf="@+id/ivProfilePic"
+    app:layout_constraintVertical_bias="0.9"
+    app:layout_constraintHorizontal_bias="0.9" />
 
     <!-- Both IDs for compatibility -->
     <TextView

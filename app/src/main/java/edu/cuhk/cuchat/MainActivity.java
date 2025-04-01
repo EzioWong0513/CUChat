@@ -24,6 +24,7 @@ import com.google.firebase.firestore.DocumentChange;
 import com.google.firebase.firestore.FirebaseFirestore;
 
 import edu.cuhk.cuchat.adapters.ViewPagerAdapter;
+import edu.cuhk.cuchat.services.UserStatusService;
 
 public class MainActivity extends AppCompatActivity {
 
@@ -86,6 +87,9 @@ public class MainActivity extends AppCompatActivity {
                 }
             }
         });
+
+        // Start user status service
+        startService(new Intent(this, UserStatusService.class));
 
         // Check notification permission on Android 13+
         checkNotificationPermission();

@@ -283,4 +283,28 @@ public class LoginActivity extends AppCompatActivity {
                     }
                 });
     }
+
+    private void setupOnlineStatusTracking(String userId) {
+        // Update user's online status in Firestore
+        db.collection("users").document(userId)
+                .update("isOnline", true,
+                        "lastSeen", System.currentTimeMillis())
+                .addOnSuccessListener(aVoid -> {
+                    Log.d(TAG, "User marked as online");
+
+                    // Set up a tracker in Firebase Database (not Firestore) for connection state
+                    FirebaseDatabase.getInstance().getReference().child("status").child(userId)
+                            .setValue("online")
+                            .addOnSuccessListener(aVoid2 -> {
+                                // Set up disconnect handler
+                                FirebaseDatabase.getInstance().getReference().child("status").child(userId)
+                                        .onDisconnect()
+                                        .setValue("offline")
+                                        .addOnSuccessListener(aVoid3 -> {
+                                            Log.d(TAG, "Disconnect handler set up successfully");
+                                        });
+                            });
+                });
+    }
+
 }

@@ -90,6 +90,12 @@ public class ChatListAdapter extends RecyclerView.Adapter<ChatListAdapter.ChatVi
                 holder.ivUnread.setVisibility(chat.isUnread() ? View.VISIBLE : View.INVISIBLE);
             }
 
+            // Handle online status indicator - this is the key part that needs fixing
+            if (holder.onlineIndicator != null) {
+                // Only show the indicator if the user is actually online
+                holder.onlineIndicator.setVisibility(chat.isUserOnline() ? View.VISIBLE : View.GONE);
+            }
+
             // Handle profile image
             if (holder.ivProfilePic != null) {
                 if (chat.getProfileImageUrl() != null && !chat.getProfileImageUrl().isEmpty()) {
@@ -193,6 +199,7 @@ public class ChatListAdapter extends RecyclerView.Adapter<ChatListAdapter.ChatVi
         CircleImageView ivProfilePic;
         TextView tvUsername, tvLastMessage, tvTimestamp;
         View ivUnread;
+        View onlineIndicator; // Make sure this is properly declared
 
         ChatViewHolder(@NonNull View itemView) {
             super(itemView);
@@ -214,6 +221,9 @@ public class ChatListAdapter extends RecyclerView.Adapter<ChatListAdapter.ChatVi
                 if (tvTimestamp == null) {
                     tvTimestamp = itemView.findViewById(R.id.tvTime);
                 }
+
+                // Make sure to find the online indicator view
+                onlineIndicator = itemView.findViewById(R.id.onlineIndicator);
             } catch (Exception e) {
                 Log.e("ChatViewHolder", "Error finding views", e);
             }
