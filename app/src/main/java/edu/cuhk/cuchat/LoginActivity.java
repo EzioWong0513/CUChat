@@ -18,6 +18,11 @@ import com.google.android.material.textfield.TextInputEditText;
 import com.google.firebase.auth.AuthResult;
 import com.google.firebase.auth.FirebaseAuth;
 import com.google.firebase.auth.FirebaseUser;
+import com.google.firebase.firestore.FirebaseFirestore;
+import com.google.firebase.messaging.FirebaseMessaging;
+
+import java.util.HashMap;
+import java.util.Map;
 
 public class LoginActivity extends AppCompatActivity {
 
@@ -27,6 +32,7 @@ public class LoginActivity extends AppCompatActivity {
     private TextView tvRegisterPrompt;
 
     private FirebaseAuth mAuth;
+    private FirebaseFirestore db;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -35,6 +41,7 @@ public class LoginActivity extends AppCompatActivity {
 
         // Initialize Firebase Auth
         mAuth = FirebaseAuth.getInstance();
+        db = FirebaseFirestore.getInstance();
 
         // Initialize UI elements
         etEmail = findViewById(R.id.etEmail);
@@ -104,6 +111,10 @@ public class LoginActivity extends AppCompatActivity {
                             // Sign in success
                             Log.d(TAG, "signInWithEmail:success");
                             FirebaseUser user = mAuth.getCurrentUser();
+
+                            // Update FCM token after successful login
+                            updateFCMToken();
+
                             // Navigate to MainActivity
                             startActivity(new Intent(LoginActivity.this, MainActivity.class));
                             finish();
@@ -113,6 +124,32 @@ public class LoginActivity extends AppCompatActivity {
                             Toast.makeText(LoginActivity.this, "Authentication failed: " + task.getException().getMessage(),
                                     Toast.LENGTH_SHORT).show();
                         }
+                    }
+                });
+    }
+
+    private void updateFCMToken() {
+        FirebaseMessaging.getInstance().getToken()
+                .addOnCompleteListener(task -> {
+                    if (!task.isSuccessful()) {
+                        Log.w(TAG, "Fetching FCM registration token failed", task.getException());
+                        return;
+                    }
+
+                    // Get new FCM registration token
+                    String token = task.getResult();
+                    Log.d(TAG, "FCM Token: " + token);
+
+                    // Save the token to Firestore for this user
+                    if (mAuth.getCurrentUser() != null) {
+                        String userId = mAuth.getCurrentUser().getUid();
+                        Map<String, Object> tokenData = new HashMap<>();
+                        tokenData.put("fcmToken", token);
+
+                        db.collection("users").document(userId)
+                                .update(tokenData)
+                                .addOnSuccessListener(aVoid -> Log.d(TAG, "FCM token updated successfully"))
+                                .addOnFailureListener(e -> Log.w(TAG, "Error updating FCM token", e));
                     }
                 });
     }

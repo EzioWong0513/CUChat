@@ -20,6 +20,7 @@ import com.google.firebase.auth.FirebaseAuth;
 import com.google.firebase.auth.FirebaseUser;
 import com.google.firebase.auth.UserProfileChangeRequest;
 import com.google.firebase.firestore.FirebaseFirestore;
+import com.google.firebase.messaging.FirebaseMessaging;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -123,32 +124,8 @@ public class RegisterActivity extends AppCompatActivity {
                                             if (task.isSuccessful()) {
                                                 Log.d(TAG, "User profile updated.");
 
-                                                // Store additional user info in Firestore
-                                                Map<String, Object> userMap = new HashMap<>();
-                                                userMap.put("userId", user.getUid());
-                                                userMap.put("username", username);
-                                                userMap.put("email", email);
-                                                userMap.put("bio", "");
-                                                userMap.put("status", "Hey, I'm using CUChat!");
-                                                userMap.put("profileImageUrl", "");
-                                                userMap.put("createdAt", System.currentTimeMillis());
-                                                userMap.put("isOnline", true);
-
-                                                db.collection("users").document(user.getUid())
-                                                        .set(userMap)
-                                                        .addOnCompleteListener(new OnCompleteListener<Void>() {
-                                                            @Override
-                                                            public void onComplete(@NonNull Task<Void> task) {
-                                                                if (task.isSuccessful()) {
-                                                                    Toast.makeText(RegisterActivity.this, "Registration successful",
-                                                                            Toast.LENGTH_SHORT).show();
-                                                                    startActivity(new Intent(RegisterActivity.this, MainActivity.class));
-                                                                    finish();
-                                                                } else {
-                                                                    Log.w(TAG, "Error adding user to Firestore", task.getException());
-                                                                }
-                                                            }
-                                                        });
+                                                // Get and update FCM token
+                                                updateFCMToken(user, username, email);
                                             }
                                         }
                                     });
@@ -158,6 +135,59 @@ public class RegisterActivity extends AppCompatActivity {
                             Log.w(TAG, "createUserWithEmail:failure", task.getException());
                             Toast.makeText(RegisterActivity.this, "Registration failed: " + task.getException().getMessage(),
                                     Toast.LENGTH_SHORT).show();
+                        }
+                    }
+                });
+    }
+
+    private void updateFCMToken(FirebaseUser user, String username, String email) {
+        FirebaseMessaging.getInstance().getToken()
+                .addOnCompleteListener(task -> {
+                    if (!task.isSuccessful()) {
+                        Log.w(TAG, "Fetching FCM registration token failed", task.getException());
+                        // Continue with user creation even if token fetch fails
+                        createUserInFirestore(user, username, email, null);
+                        return;
+                    }
+
+                    // Get new FCM registration token
+                    String token = task.getResult();
+                    Log.d(TAG, "FCM Token: " + token);
+
+                    // Create user with token
+                    createUserInFirestore(user, username, email, token);
+                });
+    }
+
+    private void createUserInFirestore(FirebaseUser user, String username, String email, String fcmToken) {
+        // Store additional user info in Firestore
+        Map<String, Object> userMap = new HashMap<>();
+        userMap.put("userId", user.getUid());
+        userMap.put("username", username);
+        userMap.put("email", email);
+        userMap.put("bio", "");
+        userMap.put("status", "Hey, I'm using CUChat!");
+        userMap.put("profileImageUrl", "");
+        userMap.put("createdAt", System.currentTimeMillis());
+        userMap.put("isOnline", true);
+
+        // Add FCM token if available
+        if (fcmToken != null) {
+            userMap.put("fcmToken", fcmToken);
+        }
+
+        db.collection("users").document(user.getUid())
+                .set(userMap)
+                .addOnCompleteListener(new OnCompleteListener<Void>() {
+                    @Override
+                    public void onComplete(@NonNull Task<Void> task) {
+                        if (task.isSuccessful()) {
+                            Toast.makeText(RegisterActivity.this, "Registration successful",
+                                    Toast.LENGTH_SHORT).show();
+                            startActivity(new Intent(RegisterActivity.this, MainActivity.class));
+                            finish();
+                        } else {
+                            Log.w(TAG, "Error adding user to Firestore", task.getException());
                         }
                     }
                 });

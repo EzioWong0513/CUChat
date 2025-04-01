@@ -17,7 +17,7 @@ import com.google.android.gms.tasks.OnCompleteListener;
 import com.google.android.gms.tasks.Task;
 import com.google.firebase.auth.FirebaseAuth;
 import com.google.firebase.auth.FirebaseUser;
-import com.google.firebase.firestore.DocumentChange;  // Add this import
+import com.google.firebase.firestore.DocumentChange;
 import com.google.firebase.firestore.FirebaseFirestore;
 import com.google.firebase.messaging.FirebaseMessagingService;
 import com.google.firebase.messaging.RemoteMessage;
@@ -32,14 +32,12 @@ import edu.cuhk.cuchat.R;
 public class NotificationService extends FirebaseMessagingService {
 
     private static final String TAG = "NotificationService";
-    private FirebaseFirestore db;
+    private static final String CHANNEL_ID = "cuchat_channel";
 
     @Override
     public void onCreate() {
         super.onCreate();
-        db = FirebaseFirestore.getInstance();
-
-        setupMessageListener();
+        Log.d(TAG, "NotificationService created");
     }
 
     @Override
@@ -60,23 +58,32 @@ public class NotificationService extends FirebaseMessagingService {
             String clickAction = null;
             String chatUserId = null;
 
-            if (data != null) {
+            if (data != null && !data.isEmpty()) {
                 clickAction = data.get("click_action");
                 chatUserId = data.get("user_id");
+                Log.d(TAG, "Message data: clickAction=" + clickAction + ", chatUserId=" + chatUserId);
             }
 
             sendNotification(title, body, clickAction, chatUserId);
+        } else if (remoteMessage.getData().size() > 0) {
+            // Handle data messages
+            Map<String, String> data = remoteMessage.getData();
+            Log.d(TAG, "Message data payload: " + data);
 
+            String title = data.get("title");
+            String body = data.get("body");
+            String clickAction = data.get("click_action");
+            String chatUserId = data.get("user_id");
+
+            if (title != null && body != null) {
+                sendNotification(title, body, clickAction, chatUserId);
+            }
         }
     }
 
     @Override
     public void onNewToken(@NonNull String token) {
         Log.d(TAG, "Refreshed token: " + token);
-
-        // If you want to send messages to this application instance or
-        // manage this app's subscriptions on the server side, send the
-        // FCM registration token to your app server.
         sendRegistrationToServer(token);
     }
 
@@ -89,7 +96,7 @@ public class NotificationService extends FirebaseMessagingService {
             Map<String, Object> tokenData = new HashMap<>();
             tokenData.put("fcmToken", token);
 
-            db.collection("users").document(userId)
+            FirebaseFirestore.getInstance().collection("users").document(userId)
                     .update(tokenData)
                     .addOnCompleteListener(new OnCompleteListener<Void>() {
                         @Override
@@ -111,12 +118,39 @@ public class NotificationService extends FirebaseMessagingService {
             // If notification is for a chat message, open the specific chat
             intent = new Intent(this, ChatActivity.class);
             intent.putExtra("userId", chatUserId);
+
+            // Get the username and profile image for the chat
+            FirebaseFirestore.getInstance().collection("users").document(chatUserId)
+                    .get()
+                    .addOnSuccessListener(documentSnapshot -> {
+                        if (documentSnapshot.exists()) {
+                            String username = documentSnapshot.getString("username");
+                            String profileImageUrl = documentSnapshot.getString("profileImageUrl");
+
+                            intent.putExtra("username", username);
+                            intent.putExtra("profileImageUrl", profileImageUrl);
+
+                            // Now continue with showing the notification
+                            showNotificationWithIntent(title, messageBody, intent, chatUserId.hashCode());
+                        } else {
+                            showNotificationWithIntent(title, messageBody, intent, chatUserId.hashCode());
+                        }
+                    })
+                    .addOnFailureListener(e -> {
+                        showNotificationWithIntent(title, messageBody, intent, chatUserId.hashCode());
+                    });
+
+            return; // Exit early as we'll show notification from the callback
         } else {
             // Otherwise, open the main activity
             intent = new Intent(this, MainActivity.class);
+            intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP);
         }
 
-        intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP);
+        showNotificationWithIntent(title, messageBody, intent, 0);
+    }
+
+    private void showNotificationWithIntent(String title, String messageBody, Intent intent, int notificationId) {
         PendingIntent pendingIntent = PendingIntent.getActivity(this, 0, intent,
                 PendingIntent.FLAG_IMMUTABLE);
 
@@ -129,6 +163,7 @@ public class NotificationService extends FirebaseMessagingService {
                         .setContentText(messageBody)
                         .setAutoCancel(true)
                         .setSound(defaultSoundUri)
+                        .setPriority(NotificationCompat.PRIORITY_HIGH)
                         .setContentIntent(pendingIntent);
 
         NotificationManager notificationManager =
@@ -138,97 +173,12 @@ public class NotificationService extends FirebaseMessagingService {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             NotificationChannel channel = new NotificationChannel(channelId,
                     "CUChat Notifications",
-                    NotificationManager.IMPORTANCE_DEFAULT);
+                    NotificationManager.IMPORTANCE_HIGH);
+            channel.enableLights(true);
+            channel.enableVibration(true);
             notificationManager.createNotificationChannel(channel);
         }
 
-        notificationManager.notify(0, notificationBuilder.build());
-    }
-
-    // Add this method to your NotificationService class
-    public void setupMessageListener() {
-        Log.d(TAG, "setupMessageListener() called");
-        FirebaseUser currentUser = FirebaseAuth.getInstance().getCurrentUser();
-        if (currentUser == null) {
-            Log.d(TAG, "currentUser is null, exiting setupMessageListener()");
-            return;
-        }
-
-        String currentUserId = currentUser.getUid();
-        Log.d(TAG, "Setting up listener for user: " + currentUserId);
-
-        // Listen for messages where the current user is the receiver
-        FirebaseFirestore.getInstance().collectionGroup("messages")
-                .whereEqualTo("receiverId", currentUserId)
-                .whereEqualTo("seen", false)
-                .whereEqualTo("notificationSent", false)
-                .addSnapshotListener((snapshots, e) -> {
-                    if (e != null) {
-                        Log.w(TAG, "Listen failed.", e);
-                        return;
-                    }
-
-                    Log.d(TAG, "Snapshot listener triggered. Empty? " +
-                            (snapshots == null || snapshots.isEmpty()));
-
-
-                    if (snapshots != null && !snapshots.isEmpty()) {
-                        Log.d(TAG, "Number of documents: " + snapshots.size());
-                        for (DocumentChange dc : snapshots.getDocumentChanges()) {
-                            if (dc.getType() == DocumentChange.Type.ADDED) {
-                                // Get message data
-                                String senderId = dc.getDocument().getString("senderId");
-                                String content = dc.getDocument().getString("content");
-
-                                // Mark notification as sent
-                                dc.getDocument().getReference().update("notificationSent", true);
-
-                                // Get sender's name
-                                FirebaseFirestore.getInstance().collection("users")
-                                        .document(senderId)
-                                        .get()
-                                        .addOnSuccessListener(document -> {
-                                            if (document.exists()) {
-                                                String senderName = document.getString("username");
-                                                // Show local notification
-                                                showLocalNotification(senderName, content, senderId);
-                                            }
-                                        });
-                            }
-                        }
-                    }
-                });
-    }
-
-    private void showLocalNotification(String title, String body, String senderId) {
-        // Create notification
-        Intent intent = new Intent(this, ChatActivity.class);
-        intent.putExtra("userId", senderId);
-        PendingIntent pendingIntent = PendingIntent.getActivity(
-                this, 0, intent, PendingIntent.FLAG_IMMUTABLE);
-
-        String channelId = getString(R.string.default_notification_channel_id);
-        Uri defaultSoundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION);
-        NotificationCompat.Builder notificationBuilder =
-                new NotificationCompat.Builder(this, channelId)
-                        .setSmallIcon(R.drawable.ic_launcher_foreground)
-                        .setContentTitle(title)
-                        .setContentText(body)
-                        .setAutoCancel(true)
-                        .setSound(defaultSoundUri)
-                        .setContentIntent(pendingIntent);
-
-        NotificationManager notificationManager =
-                (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
-
-        // Since android Oreo notification channel is needed.
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            NotificationChannel channel = new NotificationChannel(channelId,
-                    "CUChat Notifications",
-                    NotificationManager.IMPORTANCE_DEFAULT);
-            notificationManager.createNotificationChannel(channel);
-        }
-
-        notificationManager.notify(0, notificationBuilder.build());
+        notificationManager.notify(notificationId, notificationBuilder.build());
     }
 }

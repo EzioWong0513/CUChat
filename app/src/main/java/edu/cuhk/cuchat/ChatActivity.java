@@ -197,8 +197,22 @@ public class ChatActivity extends AppCompatActivity {
                     Log.d(TAG, "Message sent with ID: " + documentReference.getId());
                     etMessage.setText("");
 
-                    // THIS LINE IS CRUCIAL - Make sure it's here and not commented out!
+                    // Update chat summary
                     updateChatSummary(messageContent, timestamp);
+
+                    // Look up the receiver's FCM token to potentially send a notification
+                    db.collection("users").document(chatUserId)
+                            .get()
+                            .addOnSuccessListener(documentSnapshot -> {
+                                String receiverToken = documentSnapshot.getString("fcmToken");
+                                boolean isOnline = Boolean.TRUE.equals(documentSnapshot.getBoolean("isOnline"));
+
+                                // For demonstration - mark that we checked for notification
+                                // In a real implementation, you would send this from a server
+                                documentReference.update("notificationSent", true);
+
+                                Log.d(TAG, "Receiver online status: " + isOnline + ", has token: " + (receiverToken != null));
+                            });
                 })
                 .addOnFailureListener(e -> Log.w(TAG, "Error sending message", e));
     }
