@@ -21,9 +21,10 @@ import java.util.Locale;
 
 import de.hdodenhof.circleimageview.CircleImageView;
 import edu.cuhk.cuchat.ChatActivity;
+import edu.cuhk.cuchat.GroupChatActivity;
 import edu.cuhk.cuchat.R;
 import edu.cuhk.cuchat.models.ChatListItem;
-
+import android.graphics.Color;
 public class ChatListAdapter extends RecyclerView.Adapter<ChatListAdapter.ChatViewHolder> {
 
     private static final String TAG = "ChatListAdapter";
@@ -68,7 +69,18 @@ public class ChatListAdapter extends RecyclerView.Adapter<ChatListAdapter.ChatVi
 
             // Handle tvUsername - might be tvChatTitle in the layout
             if (holder.tvUsername != null) {
-                holder.tvUsername.setText(chat.getUsername() != null ? chat.getUsername() : "Unknown User");
+                if (chat.isGroupChat()) {
+                    // For group chats, explicitly show member count in parentheses
+                    int memberCount = chat.getGroupParticipants();
+                    String displayName = chat.getUsername();
+                    if (memberCount > 0) {
+                        displayName += " (" + memberCount + ")";
+                    }
+                    holder.tvUsername.setText(displayName);
+                    Log.d(TAG, "Displaying group: " + displayName);
+                } else {
+                    holder.tvUsername.setText(chat.getUsername() != null ? chat.getUsername() : "Unknown User");
+                }
             }
 
             // Handle tvLastMessage
@@ -76,7 +88,11 @@ public class ChatListAdapter extends RecyclerView.Adapter<ChatListAdapter.ChatVi
                 if (chat.getLastMessage() != null && !chat.getLastMessage().isEmpty()) {
                     holder.tvLastMessage.setText(chat.getLastMessage());
                 } else {
-                    holder.tvLastMessage.setText("No messages yet");
+                    if (chat.isGroupChat()) {
+                        holder.tvLastMessage.setText("Group created");
+                    } else {
+                        holder.tvLastMessage.setText("No messages yet");
+                    }
                 }
             }
 
@@ -85,44 +101,72 @@ public class ChatListAdapter extends RecyclerView.Adapter<ChatListAdapter.ChatVi
                 holder.tvTimestamp.setText(formatTime(chat.getLastMessageTime()));
             }
 
-            // Handle unread indicator
+            // Handle unread indicator - make this more visible for debugging
             if (holder.ivUnread != null) {
-                holder.ivUnread.setVisibility(chat.isUnread() ? View.VISIBLE : View.INVISIBLE);
+                boolean isUnread = chat.isUnread();
+                holder.ivUnread.setVisibility(isUnread ? View.VISIBLE : View.INVISIBLE);
+                Log.d(TAG, "Chat with " + chat.getUsername() + " unread status: " + isUnread);
             }
 
-            // Handle online status indicator - this is the key part that needs fixing
+            // Handle online status indicator
             if (holder.onlineIndicator != null) {
-                // Only show the indicator if the user is actually online
-                holder.onlineIndicator.setVisibility(chat.isUserOnline() ? View.VISIBLE : View.GONE);
+                if (chat.isGroupChat()) {
+                    holder.onlineIndicator.setVisibility(View.GONE);
+                } else {
+                    // Only show the indicator if the user is actually online
+                    holder.onlineIndicator.setVisibility(chat.isUserOnline() ? View.VISIBLE : View.GONE);
+                }
             }
 
             // Handle profile image
             if (holder.ivProfilePic != null) {
-                if (chat.getProfileImageUrl() != null && !chat.getProfileImageUrl().isEmpty()) {
+                if (chat.isGroupChat()) {
+                    // Set a default group icon with a distinct color to identify groups
+                    holder.ivProfilePic.setImageResource(R.drawable.ic_launcher_foreground);
+                    try {
+                        // Set a colored background for group chats to make them stand out
+                        holder.ivProfilePic.setBackgroundColor(context.getResources().getColor(R.color.purple_200));
+                    } catch (Exception e) {
+                        Log.e(TAG, "Error setting group icon background color", e);
+                    }
+                } else if (chat.getProfileImageUrl() != null && !chat.getProfileImageUrl().isEmpty()) {
                     try {
                         Glide.with(context)
                                 .load(chat.getProfileImageUrl())
                                 .placeholder(R.drawable.ic_launcher_foreground)
                                 .into(holder.ivProfilePic);
+                        // Reset background for normal users
+                        holder.ivProfilePic.setBackgroundColor(Color.TRANSPARENT);
                     } catch (Exception e) {
                         Log.e(TAG, "Error loading image", e);
                         holder.ivProfilePic.setImageResource(R.drawable.ic_launcher_foreground);
                     }
                 } else {
                     holder.ivProfilePic.setImageResource(R.drawable.ic_launcher_foreground);
+                    // Reset background for normal users
+                    holder.ivProfilePic.setBackgroundColor(Color.TRANSPARENT);
                 }
             }
 
             // Set click listener
             holder.itemView.setOnClickListener(v -> {
                 try {
-                    Intent intent = new Intent(context, ChatActivity.class);
-                    intent.putExtra("userId", chat.getUserId());
-                    intent.putExtra("username", chat.getUsername());
-                    intent.putExtra("profileImageUrl", chat.getProfileImageUrl());
-                    context.startActivity(intent);
+                    if (chat.isGroupChat()) {
+                        // Open group chat activity
+                        Intent intent = new Intent(context, GroupChatActivity.class);
+                        intent.putExtra("chatId", chat.getChatId());
+                        intent.putExtra("groupName", chat.getUsername());
+                        context.startActivity(intent);
+                    } else {
+                        // Open regular chat activity
+                        Intent intent = new Intent(context, ChatActivity.class);
+                        intent.putExtra("userId", chat.getUserId());
+                        intent.putExtra("username", chat.getUsername());
+                        intent.putExtra("profileImageUrl", chat.getProfileImageUrl());
+                        context.startActivity(intent);
+                    }
                 } catch (Exception e) {
-                    Log.e(TAG, "Error starting ChatActivity", e);
+                    Log.e(TAG, "Error starting chat activity", e);
                 }
             });
         } catch (Exception e) {

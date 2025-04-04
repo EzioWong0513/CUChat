@@ -7,18 +7,20 @@ public class Message {
     private String content;
     private long timestamp;
     private boolean seen;
+    private boolean isSystemMessage;
 
     // Empty constructor for Firestore
     public Message() {
     }
 
-    public Message(String messageId, String senderId, String receiverId, String content, long timestamp, boolean seen) {
+    public Message(String messageId, String senderId, String receiverId, String content, long timestamp, boolean seen, boolean isSystemMessage) {
         this.messageId = messageId;
         this.senderId = senderId;
         this.receiverId = receiverId;
         this.content = content;
         this.timestamp = timestamp;
         this.seen = seen;
+        this.isSystemMessage = isSystemMessage;
     }
 
     // Getters and setters
@@ -68,5 +70,13 @@ public class Message {
 
     public void setSeen(boolean seen) {
         this.seen = seen;
+    }
+
+    public boolean isSystemMessage() {
+        return isSystemMessage;
+    }
+
+    public void setSystemMessage(boolean systemMessage) {
+        isSystemMessage = systemMessage;
     }
 }

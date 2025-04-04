@@ -56,6 +56,15 @@
             android:exported="false"
             android:windowSoftInputMode="adjustResize" />
 
+        <activity
+            android:name=".GroupCreationActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".GroupChatActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize" />
+
         <service
             android:name=".services.NotificationService"
             android:exported="false">

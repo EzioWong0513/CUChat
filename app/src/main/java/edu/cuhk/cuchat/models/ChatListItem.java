@@ -10,6 +10,8 @@ public class ChatListItem {
     private boolean unread;
     private boolean isPinned;
     private boolean isUserOnline; // Added field for user online status
+    private boolean isGroupChat;
+    private int groupParticipants;
 
     // Empty constructor for Firestore
     public ChatListItem() {
@@ -111,5 +113,20 @@ public class ChatListItem {
 
     public void setUserOnline(boolean userOnline) {
         isUserOnline = userOnline;
+    }
+    public boolean isGroupChat() {
+        return isGroupChat;
+    }
+
+    public void setGroupChat(boolean groupChat) {
+        isGroupChat = groupChat;
+    }
+
+    public int getGroupParticipants() {
+        return groupParticipants;
+    }
+
+    public void setGroupParticipants(int groupParticipants) {
+        this.groupParticipants = groupParticipants;
     }
 }
