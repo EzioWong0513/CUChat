@@ -46,6 +46,7 @@ dependencies {
     implementation("com.google.firebase:firebase-firestore")
     implementation("com.google.firebase:firebase-storage")
     implementation("com.google.firebase:firebase-messaging")
+    implementation("com.google.firebase:firebase-database")
 
     // Google Maps
     implementation("com.google.android.gms:play-services-maps:18.2.0")

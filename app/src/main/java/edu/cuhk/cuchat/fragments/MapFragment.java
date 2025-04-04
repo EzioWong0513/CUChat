@@ -3,6 +3,7 @@ package edu.cuhk.cuchat.fragments;
 import android.Manifest;
 import android.annotation.SuppressLint;
 import android.content.pm.PackageManager;
+import android.graphics.Color;
 import android.location.Location;
 import android.os.Bundle;
 import android.os.Handler;
@@ -11,7 +12,6 @@ import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.Button;
 import android.widget.ImageButton;
 import android.widget.LinearLayout;
 import android.widget.Toast;
@@ -19,6 +19,8 @@ import android.widget.Toast;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.core.app.ActivityCompat;
+import androidx.constraintlayout.widget.ConstraintLayout;
+import androidx.constraintlayout.widget.ConstraintSet;
 import androidx.fragment.app.Fragment;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
@@ -29,6 +31,7 @@ import com.google.android.gms.maps.CameraUpdateFactory;
 import com.google.android.gms.maps.GoogleMap;
 import com.google.android.gms.maps.OnMapReadyCallback;
 import com.google.android.gms.maps.SupportMapFragment;
+import com.google.android.gms.maps.model.BitmapDescriptor;
 import com.google.android.gms.maps.model.BitmapDescriptorFactory;
 import com.google.android.gms.maps.model.LatLng;
 import com.google.android.gms.maps.model.MarkerOptions;
@@ -65,6 +68,7 @@ public class MapFragment extends Fragment implements OnMapReadyCallback {
     private RecyclerView rvNearbyUsers;
     private NearbyUsersAdapter nearbyUsersAdapter;
     private List<User> nearbyUsersList;
+    private ConstraintLayout rootLayout;
 
     private FirebaseAuth mAuth;
     private FirebaseFirestore db;
@@ -74,6 +78,14 @@ public class MapFragment extends Fragment implements OnMapReadyCallback {
     private Handler handler = new Handler(Looper.getMainLooper());
 
     private ImageButton btnDismissNearbyUsers;
+
+    // Store the original height of the nearby users list
+    private int originalNearbyUsersHeight;
+    private boolean isNearbyUsersExpanded = false;
+
+    // Store the original and expanded heights for the list
+    private float nearbyListExpandedHeight = 0.3f; // 30% of screen height
+    private float nearbyListCollapsedHeight = 0.6f; // 60% of screen height
 
     public MapFragment() {
         // Required empty public constructor
@@ -136,6 +148,7 @@ public class MapFragment extends Fragment implements OnMapReadyCallback {
             llNearbyUsersList = view.findViewById(R.id.llNearbyUsersList);
             rvNearbyUsers = view.findViewById(R.id.rvNearbyUsers);
             btnDismissNearbyUsers = view.findViewById(R.id.btnDismissNearbyUsers);
+            rootLayout = view.findViewById(R.id.rootConstraintLayout);
 
             // Check if views were found
             if (fabMyLocation == null || fabNearbyUsers == null ||
@@ -155,6 +168,13 @@ public class MapFragment extends Fragment implements OnMapReadyCallback {
             if (rvNearbyUsers != null) {
                 rvNearbyUsers.setLayoutManager(new LinearLayoutManager(requireContext()));
                 rvNearbyUsers.setAdapter(nearbyUsersAdapter);
+
+                // Save the original height for later
+                rvNearbyUsers.post(() -> {
+                    if (rvNearbyUsers != null) {
+                        originalNearbyUsersHeight = rvNearbyUsers.getLayoutParams().height;
+                    }
+                });
             }
         } catch (Exception e) {
             Log.e(TAG, "Error initializing nearby users list", e);
@@ -178,6 +198,10 @@ public class MapFragment extends Fragment implements OnMapReadyCallback {
                 fabNearbyUsers.setOnClickListener(v -> {
                     if (llNearbyUsersList.getVisibility() == View.VISIBLE) {
                         llNearbyUsersList.setVisibility(View.GONE);
+                        isNearbyUsersExpanded = false;
+
+                        // Reset the constraint to original
+                        resetMapToFullSize();
                     } else {
                         findNearbyUsers();
                     }
@@ -189,6 +213,10 @@ public class MapFragment extends Fragment implements OnMapReadyCallback {
                     // Hide the nearby users panel
                     if (llNearbyUsersList != null) {
                         llNearbyUsersList.setVisibility(View.GONE);
+                        isNearbyUsersExpanded = false;
+
+                        // Reset the map to full size
+                        resetMapToFullSize();
                     }
 
                     // Clear map markers if needed
@@ -201,15 +229,62 @@ public class MapFragment extends Fragment implements OnMapReadyCallback {
                             mMap.addMarker(new MarkerOptions()
                                     .position(currentUserLatLng)
                                     .title("You are here")
-                                    .icon(BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_BLUE)));
+                                    .icon(getColoredMarkerIcon(getResources().getColor(R.color.purple_500))));
+
+                            // Center the map on the user's location
+                            mMap.animateCamera(CameraUpdateFactory.newLatLngZoom(currentUserLatLng, DEFAULT_ZOOM));
                         }
                     }
+                });
+            }
 
+            // Toggle expand/collapse of nearby users list on title click
+            View tvNearbyUsersTitle = getView().findViewById(R.id.tvNearbyUsersTitle);
+            if (tvNearbyUsersTitle != null) {
+                tvNearbyUsersTitle.setOnClickListener(v -> {
+                    toggleNearbyUsersListSize();
                 });
             }
         } catch (Exception e) {
             Log.e(TAG, "Error setting click listeners", e);
         }
+    }
+
+    // Toggle between expanded and collapsed view for nearby users list
+    private void toggleNearbyUsersListSize() {
+        if (rootLayout == null || llNearbyUsersList == null) return;
+
+        ConstraintSet constraintSet = new ConstraintSet();
+        constraintSet.clone(rootLayout);
+
+        if (isNearbyUsersExpanded) {
+            // Collapse - more map, less list
+            constraintSet.constrainPercentHeight(llNearbyUsersList.getId(), nearbyListExpandedHeight);
+            isNearbyUsersExpanded = false;
+        } else {
+            // Expand - less map, more list
+            constraintSet.constrainPercentHeight(llNearbyUsersList.getId(), nearbyListCollapsedHeight);
+            isNearbyUsersExpanded = true;
+        }
+
+        // Apply changes with animation
+        constraintSet.applyTo(rootLayout);
+    }
+
+    // Reset the map to full size
+    private void resetMapToFullSize() {
+        if (rootLayout == null) return;
+
+        ConstraintSet constraintSet = new ConstraintSet();
+        constraintSet.clone(rootLayout);
+
+        // Remove any height constraints on the nearby users list
+        if (llNearbyUsersList != null) {
+            llNearbyUsersList.setVisibility(View.GONE);
+        }
+
+        // Apply changes
+        constraintSet.applyTo(rootLayout);
     }
 
     @Override
@@ -264,6 +339,12 @@ public class MapFragment extends Fragment implements OnMapReadyCallback {
                                 if (mMap != null && mapReady) {
                                     LatLng currentLatLng = new LatLng(location.getLatitude(), location.getLongitude());
                                     mMap.moveCamera(CameraUpdateFactory.newLatLngZoom(currentLatLng, DEFAULT_ZOOM));
+
+                                    // Add marker for current user with purple color
+                                    mMap.addMarker(new MarkerOptions()
+                                            .position(currentLatLng)
+                                            .title("You are here")
+                                            .icon(getColoredMarkerIcon(getResources().getColor(R.color.purple_500))));
                                 }
                             } else {
                                 Log.w(TAG, "Location is null");
@@ -286,6 +367,13 @@ public class MapFragment extends Fragment implements OnMapReadyCallback {
         }
     }
 
+    // Method to get a colored marker icon
+    private BitmapDescriptor getColoredMarkerIcon(int color) {
+        float[] hsv = new float[3];
+        Color.colorToHSV(color, hsv);
+        return BitmapDescriptorFactory.defaultMarker(hsv[0]);
+    }
+
     private void updateUserLocation(Location location) {
         if (mAuth == null || mAuth.getCurrentUser() == null || db == null) {
             Log.w(TAG, "Cannot update user location: Auth or Firestore is null");
@@ -306,12 +394,22 @@ public class MapFragment extends Fragment implements OnMapReadyCallback {
         }
     }
 
-    // Improved nearby user search that works regardless of map state
+    // Improved nearby user search that makes the map larger
     private void findNearbyUsers() {
         try {
-            // Show the nearby users list regardless of map state
+            // Show the nearby users list
             if (llNearbyUsersList != null) {
                 llNearbyUsersList.setVisibility(View.VISIBLE);
+
+                // Set initial height constraint for nearby users list (30% of screen)
+                if (rootLayout != null) {
+                    ConstraintSet constraintSet = new ConstraintSet();
+                    constraintSet.clone(rootLayout);
+                    constraintSet.constrainPercentHeight(llNearbyUsersList.getId(), nearbyListExpandedHeight);
+                    constraintSet.applyTo(rootLayout);
+                }
+
+                isNearbyUsersExpanded = false;
             }
 
             // Check if we have a location
@@ -334,12 +432,15 @@ public class MapFragment extends Fragment implements OnMapReadyCallback {
             if (mMap != null && mapReady) {
                 mMap.clear();
 
-                // Add current user marker
+                // Add current user marker with purple color
                 LatLng currentUserLatLng = new LatLng(lastKnownLocation.getLatitude(), lastKnownLocation.getLongitude());
                 mMap.addMarker(new MarkerOptions()
                         .position(currentUserLatLng)
                         .title("You are here")
-                        .icon(BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_BLUE)));
+                        .icon(getColoredMarkerIcon(getResources().getColor(R.color.purple_500))));
+
+                // Center the map on the user's location
+                mMap.animateCamera(CameraUpdateFactory.newLatLngZoom(currentUserLatLng, DEFAULT_ZOOM));
             } else {
                 // Map isn't ready, but we can still search for users and show the list
                 Log.d(TAG, "Map is not ready yet, but still searching for nearby users");
@@ -450,6 +551,12 @@ public class MapFragment extends Fragment implements OnMapReadyCallback {
             if (nearbyUsersList.isEmpty()) {
                 Toast.makeText(requireContext(), "No users found nearby", Toast.LENGTH_SHORT).show();
             }
+
+            // Center map on user's location again after adding markers
+            if (mMap != null && lastKnownLocation != null) {
+                LatLng currentUserLatLng = new LatLng(lastKnownLocation.getLatitude(), lastKnownLocation.getLongitude());
+                mMap.animateCamera(CameraUpdateFactory.newLatLngZoom(currentUserLatLng, DEFAULT_ZOOM));
+            }
         } catch (Exception e) {
             Log.e(TAG, "Error processing users query result", e);
         }
@@ -517,6 +624,12 @@ public class MapFragment extends Fragment implements OnMapReadyCallback {
                 // Update adapter
                 if (nearbyUsersAdapter != null) {
                     nearbyUsersAdapter.notifyDataSetChanged();
+                }
+
+                // Center map on user's location again after adding markers
+                if (mMap != null && lastKnownLocation != null) {
+                    LatLng currentUserLatLng = new LatLng(lastKnownLocation.getLatitude(), lastKnownLocation.getLongitude());
+                    mMap.animateCamera(CameraUpdateFactory.newLatLngZoom(currentUserLatLng, DEFAULT_ZOOM));
                 }
             }
         } catch (Exception e) {

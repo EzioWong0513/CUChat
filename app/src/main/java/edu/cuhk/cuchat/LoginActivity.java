@@ -25,6 +25,9 @@ import com.google.firebase.auth.AuthResult;
 import com.google.firebase.auth.FirebaseAuth;
 import com.google.firebase.auth.FirebaseUser;
 import com.google.firebase.auth.GoogleAuthProvider;
+import com.google.firebase.database.DatabaseReference;
+import com.google.firebase.database.FirebaseDatabase;
+import com.google.firebase.database.ServerValue;
 import com.google.firebase.firestore.DocumentSnapshot;
 import com.google.firebase.firestore.FirebaseFirestore;
 import com.google.firebase.messaging.FirebaseMessaging;
@@ -275,12 +278,90 @@ public class LoginActivity extends AppCompatActivity {
                         String userId = mAuth.getCurrentUser().getUid();
                         Map<String, Object> tokenData = new HashMap<>();
                         tokenData.put("fcmToken", token);
+                        tokenData.put("isOnline", true);
+                        tokenData.put("lastSeen", System.currentTimeMillis());
 
                         db.collection("users").document(userId)
                                 .update(tokenData)
-                                .addOnSuccessListener(aVoid -> Log.d(TAG, "FCM token updated successfully"))
+                                .addOnSuccessListener(aVoid -> {
+                                    Log.d(TAG, "FCM token and online status updated successfully");
+
+                                    // Also update the Realtime Database
+                                    setupOnlineStatusTracking(userId);
+                                })
                                 .addOnFailureListener(e -> Log.w(TAG, "Error updating FCM token", e));
                     }
                 });
     }
+
+    private void setupOnlineStatusTracking(String userId) {
+        // Update user's online status in Firestore
+        db.collection("users").document(userId)
+                .update("isOnline", true,
+                        "lastSeen", System.currentTimeMillis())
+                .addOnSuccessListener(aVoid -> {
+                    Log.d(TAG, "User marked as online in Firestore");
+
+                    // Set up a tracker in Firebase Realtime Database
+                    DatabaseReference userStatusRef = FirebaseDatabase.getInstance().getReference()
+                            .child("status").child(userId);
+
+                    Map<String, Object> onlineState = new HashMap<>();
+                    onlineState.put("state", "online");
+                    onlineState.put("lastChanged", ServerValue.TIMESTAMP);
+                    userStatusRef.setValue(onlineState)
+                            .addOnSuccessListener(aVoid2 -> {
+                                Log.d(TAG, "User marked as online in Realtime Database");
+
+                                // Set up disconnect handler
+                                Map<String, Object> offlineState = new HashMap<>();
+                                offlineState.put("state", "offline");
+                                offlineState.put("lastChanged", ServerValue.TIMESTAMP);
+
+                                userStatusRef.onDisconnect().setValue(offlineState)
+                                        .addOnSuccessListener(aVoid3 -> {
+                                            Log.d(TAG, "Disconnect handler set up successfully");
+                                        });
+                            });
+                });
+    }
+
+    private void createUserInFirestore(FirebaseUser user, String username, String email, String fcmToken) {
+        // Store additional user info in Firestore
+        Map<String, Object> userMap = new HashMap<>();
+        userMap.put("userId", user.getUid());
+        userMap.put("username", username);
+        userMap.put("email", email);
+        userMap.put("bio", "");
+        userMap.put("status", "Hey, I'm using CUChat!");
+        userMap.put("profileImageUrl", "");
+        userMap.put("createdAt", System.currentTimeMillis());
+        userMap.put("isOnline", true);
+        userMap.put("lastSeen", System.currentTimeMillis());
+
+        // Add FCM token if available
+        if (fcmToken != null) {
+            userMap.put("fcmToken", fcmToken);
+        }
+
+        db.collection("users").document(user.getUid())
+                .set(userMap)
+                .addOnCompleteListener(new OnCompleteListener<Void>() {
+                    @Override
+                    public void onComplete(@NonNull Task<Void> task) {
+                        if (task.isSuccessful()) {
+                            // Set up online status tracking in Realtime Database
+                            setupOnlineStatusTracking(user.getUid());
+
+                            Toast.makeText(LoginActivity.this, "Registration successful",
+                                    Toast.LENGTH_SHORT).show();
+                            startActivity(new Intent(LoginActivity.this, MainActivity.class));
+                            finish();
+                        } else {
+                            Log.w(TAG, "Error adding user to Firestore", task.getException());
+                        }
+                    }
+                });
+    }
+
 }

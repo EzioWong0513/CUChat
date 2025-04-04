@@ -9,6 +9,7 @@ public class ChatListItem {
     private long lastMessageTime;
     private boolean unread;
     private boolean isPinned;
+    private boolean isUserOnline; // Added field for user online status
 
     // Empty constructor for Firestore
     public ChatListItem() {
@@ -23,6 +24,20 @@ public class ChatListItem {
         this.lastMessage = lastMessage;
         this.lastMessageTime = lastMessageTime;
         this.unread = unread;
+        this.isUserOnline = false; // Default to offline
+    }
+
+    // Constructor with online status
+    public ChatListItem(String chatId, String userId, String username, String profileImageUrl,
+                        String lastMessage, long lastMessageTime, boolean unread, boolean isUserOnline) {
+        this.chatId = chatId;
+        this.userId = userId;
+        this.username = username;
+        this.profileImageUrl = profileImageUrl;
+        this.lastMessage = lastMessage;
+        this.lastMessageTime = lastMessageTime;
+        this.unread = unread;
+        this.isUserOnline = isUserOnline;
     }
 
     // Getters and setters
@@ -88,5 +103,13 @@ public class ChatListItem {
 
     public void setPinned(boolean pinned) {
         isPinned = pinned;
+    }
+
+    public boolean isUserOnline() {
+        return isUserOnline;
+    }
+
+    public void setUserOnline(boolean userOnline) {
+        isUserOnline = userOnline;
     }
 }

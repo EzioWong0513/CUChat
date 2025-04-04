@@ -51,6 +51,7 @@ public class ChatsFragment extends Fragment {
     private String currentUserId;
     private ListenerRegistration chatListener1;
     private ListenerRegistration chatListener2;
+    private Map<String, ListenerRegistration> userStatusListeners = new HashMap<>();
 
     private int currentTabPosition = 0;
 
@@ -295,6 +296,10 @@ public class ChatsFragment extends Fragment {
                                 String username = userDocument.getString("username");
                                 String profileImageUrl = userDocument.getString("profileImageUrl");
 
+                                // Check if user is online - this is the key change
+                                Boolean isOnline = userDocument.getBoolean("isOnline");
+                                boolean userOnlineStatus = isOnline != null && isOnline;
+
                                 if (username == null) username = "Unknown User";
 
                                 ChatListItem chatItem = new ChatListItem(
@@ -304,11 +309,12 @@ public class ChatsFragment extends Fragment {
                                         profileImageUrl,
                                         finalLastMessage,
                                         finalTimestamp,
-                                        finalIsUnread
+                                        finalIsUnread,
+                                        userOnlineStatus  // Pass the actual online status
                                 );
 
-                                // Debug log for unread status
-                                Log.d(TAG, "Chat with " + username + " isUnread: " + finalIsUnread);
+                                // Debug log for online status
+                                Log.d(TAG, "User " + username + " online status: " + userOnlineStatus);
 
                                 addOrUpdateChat(chatItem);
                             } catch (Exception e) {
@@ -324,7 +330,8 @@ public class ChatsFragment extends Fragment {
                                     null,
                                     finalLastMessage,
                                     finalTimestamp,
-                                    finalIsUnread
+                                    finalIsUnread,
+                                    false  // Default to offline for missing users
                             );
                             addOrUpdateChat(fallbackItem);
                         }
@@ -339,7 +346,8 @@ public class ChatsFragment extends Fragment {
                                 null,
                                 finalLastMessage,
                                 finalTimestamp,
-                                finalIsUnread
+                                finalIsUnread,
+                                false  // Default to offline for error cases
                         );
                         addOrUpdateChat(fallbackItem);
                     });
@@ -472,35 +480,76 @@ public class ChatsFragment extends Fragment {
         }
     }
 
+    private void setupUserStatusListeners() {
+        // Clear any existing listeners
+        for (ListenerRegistration listener : userStatusListeners.values()) {
+            listener.remove();
+        }
+        userStatusListeners.clear();
+
+        // Add listeners for each user in the chat list
+        for (ChatListItem chat : chatList) {
+            String userId = chat.getUserId();
+            if (userId != null && !userStatusListeners.containsKey(userId)) {
+                ListenerRegistration listener = db.collection("users").document(userId)
+                        .addSnapshotListener((snapshot, e) -> {
+                            if (e != null || snapshot == null || !snapshot.exists()) {
+                                return;
+                            }
+
+                            Boolean isOnline = snapshot.getBoolean("isOnline");
+                            boolean userOnlineStatus = isOnline != null && isOnline;
+
+                            // Update the chat item with the new online status
+                            for (ChatListItem item : chatList) {
+                                if (item.getUserId().equals(userId)) {
+                                    item.setUserOnline(userOnlineStatus);
+                                    break;
+                                }
+                            }
+
+                            // Notify the adapter to refresh the view
+                            if (chatListAdapter != null) {
+                                chatListAdapter.notifyDataSetChanged();
+                            }
+                        });
+
+                userStatusListeners.put(userId, listener);
+            }
+        }
+    }
+
+    // Call this in onPause or onDestroy
+    private void removeUserStatusListeners() {
+        for (ListenerRegistration listener : userStatusListeners.values()) {
+            listener.remove();
+        }
+        userStatusListeners.clear();
+    }
+
     @Override
     public void onResume() {
         super.onResume();
-        try {
-            // Only reload if we have a valid user
-            if (currentUser != null) {
-                loadChats();
-            }
-        } catch (Exception e) {
-            Log.e(TAG, "Error in onResume", e);
+        // Only reload if we have a valid user
+        if (currentUser != null) {
+            loadChats();
+            setupUserStatusListeners(); // Add this
         }
     }
 
     @Override
     public void onPause() {
         super.onPause();
-        try {
-            // Clean up listeners when fragment is paused
-            if (chatListener1 != null) {
-                chatListener1.remove();
-                chatListener1 = null;
-            }
-            if (chatListener2 != null) {
-                chatListener2.remove();
-                chatListener2 = null;
-            }
-        } catch (Exception e) {
-            Log.e(TAG, "Error in onPause", e);
+        // Clean up listeners when fragment is paused
+        if (chatListener1 != null) {
+            chatListener1.remove();
+            chatListener1 = null;
         }
+        if (chatListener2 != null) {
+            chatListener2.remove();
+            chatListener2 = null;
+        }
+        removeUserStatusListeners(); // Add this
     }
 
     @Override

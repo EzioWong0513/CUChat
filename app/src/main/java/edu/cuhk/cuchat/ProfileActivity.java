@@ -23,6 +23,7 @@ import com.google.android.material.textfield.TextInputEditText;
 import com.google.firebase.auth.FirebaseAuth;
 import com.google.firebase.auth.FirebaseUser;
 import com.google.firebase.auth.UserProfileChangeRequest;
+import com.google.firebase.database.FirebaseDatabase;
 import com.google.firebase.firestore.DocumentSnapshot;
 import com.google.firebase.firestore.FirebaseFirestore;
 import com.google.firebase.storage.FirebaseStorage;
@@ -34,6 +35,7 @@ import java.util.Map;
 
 import de.hdodenhof.circleimageview.CircleImageView;
 import edu.cuhk.cuchat.models.User;
+import edu.cuhk.cuchat.services.UserStatusService;
 
 public class ProfileActivity extends AppCompatActivity {
 
@@ -97,9 +99,7 @@ public class ProfileActivity extends AppCompatActivity {
         btnLogout.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                mAuth.signOut();
-                startActivity(new Intent(ProfileActivity.this, LoginActivity.class));
-                finish();
+                logoutUser();
             }
         });
     }
@@ -232,6 +232,32 @@ public class ProfileActivity extends AppCompatActivity {
                         Log.e(TAG, "Error updating document", e);
                     }
                 });
+    }
+
+    private void logoutUser() {
+        // Mark user as offline in Firestore
+        FirebaseUser currentUser = mAuth.getCurrentUser();
+        if (currentUser != null) {
+            FirebaseFirestore.getInstance().collection("users")
+                    .document(currentUser.getUid())
+                    .update("isOnline", false,
+                            "lastSeen", System.currentTimeMillis());
+
+            // Also mark in Realtime Database
+            FirebaseDatabase.getInstance().getReference()
+                    .child("status").child(currentUser.getUid())
+                    .setValue("offline");
+        }
+
+        // Stop the status service
+        stopService(new Intent(this, UserStatusService.class));
+
+        // Sign out from Firebase
+        mAuth.signOut();
+
+        // Navigate to login screen
+        startActivity(new Intent(this, LoginActivity.class));
+        finish();
     }
 
     @Override
