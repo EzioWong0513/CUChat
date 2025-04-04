@@ -30,6 +30,7 @@ import com.google.firebase.firestore.ListenerRegistration;
 import com.google.firebase.firestore.Query;
 import com.google.firebase.firestore.QuerySnapshot;
 import com.google.firebase.firestore.SetOptions;
+import com.google.firebase.firestore.WriteBatch;
 
 import java.util.ArrayList;
 import java.util.Calendar;
@@ -134,6 +135,8 @@ public class ChatActivity extends AppCompatActivity {
 
         // Start listening for user status changes
         listenForUserStatusChanges();
+
+        setupMessageSeenListener();
     }
 
     // Add this method to listen for user status changes
@@ -203,7 +206,18 @@ public class ChatActivity extends AppCompatActivity {
                                     messageList.add(message);
                                     break;
                                 case MODIFIED:
-                                    // Handle modified messages if needed
+                                    // Handle modified messages - update the seen status
+                                    Message updatedMessage = dc.getDocument().toObject(Message.class);
+                                    updatedMessage.setMessageId(dc.getDocument().getId());
+
+                                    // Find and replace the modified message
+                                    for (int i = 0; i < messageList.size(); i++) {
+                                        if (messageList.get(i).getMessageId().equals(updatedMessage.getMessageId())) {
+                                            messageList.set(i, updatedMessage);
+                                            messagesAdapter.notifyItemChanged(i);
+                                            break;
+                                        }
+                                    }
                                     break;
                                 case REMOVED:
                                     // Handle removed messages if needed
@@ -222,13 +236,51 @@ public class ChatActivity extends AppCompatActivity {
                 });
     }
 
+    private void setupMessageSeenListener() {
+        // Listen for changes to the messages in this chat to update seen status in real-time
+        db.collection("chats").document(chatId).collection("messages")
+                .whereEqualTo("senderId", currentUserId)  // Only listen for messages sent by the current user
+                .addSnapshotListener((snapshots, e) -> {
+                    if (e != null) {
+                        Log.w(TAG, "Listen failed.", e);
+                        return;
+                    }
+
+                    for (DocumentChange dc : snapshots.getDocumentChanges()) {
+                        if (dc.getType() == DocumentChange.Type.MODIFIED) {
+                            // Message was modified - check if seen status changed
+                            Message updatedMessage = dc.getDocument().toObject(Message.class);
+                            updatedMessage.setMessageId(dc.getDocument().getId());
+
+                            // Update the seen status in the adapter
+                            boolean seen = updatedMessage.isSeen();
+                            if (seen && messagesAdapter != null) {
+                                messagesAdapter.updateMessageSeenStatus(updatedMessage.getMessageId(), true);
+                            }
+                        }
+                    }
+                });
+    }
+
     private void markMessagesAsSeen() {
+        boolean updatedAny = false;
+        WriteBatch batch = db.batch();
+
         for (Message message : messageList) {
             if (message.getSenderId().equals(chatUserId) && !message.isSeen()) {
-                db.collection("chats").document(chatId).collection("messages")
-                        .document(message.getMessageId())
-                        .update("seen", true);
+                DocumentReference messageRef = db.collection("chats").document(chatId)
+                        .collection("messages").document(message.getMessageId());
+                batch.update(messageRef, "seen", true);
+                updatedAny = true;
             }
+        }
+
+        if (updatedAny) {
+            batch.commit().addOnSuccessListener(aVoid -> {
+                Log.d(TAG, "Batch update successful - messages marked as seen");
+            }).addOnFailureListener(e -> {
+                Log.e(TAG, "Error updating messages seen status", e);
+            });
         }
     }
 
@@ -430,7 +482,7 @@ public class ChatActivity extends AppCompatActivity {
     @Override
     protected void onResume() {
         super.onResume();
-        // Update user's online status when entering chat
+        // Update online status
         if (currentUser != null) {
             db.collection("users").document(currentUserId)
                     .update("isOnline", true);
@@ -438,6 +490,12 @@ public class ChatActivity extends AppCompatActivity {
 
         // Mark this chat as seen
         updateChatSeenStatus();
+
+        // Mark all messages as seen
+        markMessagesAsSeen();
+
+        // Update user status to online
+        updateUserStatus(true);
     }
 
     @Override

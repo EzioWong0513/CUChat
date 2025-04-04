@@ -81,13 +81,14 @@ public class MessagesAdapter extends RecyclerView.Adapter {
     }
 
     private class SentMessageHolder extends RecyclerView.ViewHolder {
-        TextView messageText, timeText;
+        TextView messageText, timeText, statusText;
 
         SentMessageHolder(View itemView) {
             super(itemView);
 
             messageText = itemView.findViewById(R.id.tvMessage);
             timeText = itemView.findViewById(R.id.tvTimestamp);
+            statusText = itemView.findViewById(R.id.tvMessageStatus);
         }
 
         void bind(Message message) {
@@ -95,6 +96,17 @@ public class MessagesAdapter extends RecyclerView.Adapter {
 
             // Format the stored timestamp into a readable String
             timeText.setText(formatTime(message.getTimestamp()));
+
+            // Set the status text based on the 'seen' field
+            if (statusText != null) {
+                if (message.isSeen()) {
+                    statusText.setText("Seen");
+                    statusText.setTextColor(context.getResources().getColor(R.color.purple_500));
+                } else {
+                    statusText.setText("Delivered");
+                    statusText.setTextColor(context.getResources().getColor(R.color.gray));
+                }
+            }
         }
     }
 
@@ -120,5 +132,30 @@ public class MessagesAdapter extends RecyclerView.Adapter {
         Calendar cal = Calendar.getInstance(Locale.ENGLISH);
         cal.setTimeInMillis(timestamp);
         return DateFormat.format("hh:mm a", cal).toString();
+    }
+
+    // Method to update a single message's seen status
+    public void updateMessageSeenStatus(String messageId, boolean seen) {
+        for (int i = 0; i < messageList.size(); i++) {
+            Message message = messageList.get(i);
+            if (message.getMessageId().equals(messageId) && message.getSenderId().equals(currentUserId)) {
+                message.setSeen(seen);
+                notifyItemChanged(i);
+                break;
+            }
+        }
+    }
+
+    // Method to update all messages to seen
+    public void updateAllMessagesSeenStatus(boolean seen) {
+        boolean updated = false;
+        for (int i = 0; i < messageList.size(); i++) {
+            Message message = messageList.get(i);
+            if (message.getSenderId().equals(currentUserId) && !message.isSeen()) {
+                message.setSeen(seen);
+                updated = true;
+                notifyItemChanged(i);
+            }
+        }
     }
 }

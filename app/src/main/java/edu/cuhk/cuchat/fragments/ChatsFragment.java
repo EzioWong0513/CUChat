@@ -1,5 +1,6 @@
 package edu.cuhk.cuchat.fragments;
 
+import android.content.Intent;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.LayoutInflater;
@@ -14,6 +15,7 @@ import androidx.fragment.app.Fragment;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
+import com.google.android.material.floatingactionbutton.FloatingActionButton;
 import com.google.android.material.tabs.TabLayout;
 import com.google.firebase.auth.FirebaseAuth;
 import com.google.firebase.auth.FirebaseUser;
@@ -30,6 +32,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import edu.cuhk.cuchat.GroupCreationActivity;
 import edu.cuhk.cuchat.R;
 import edu.cuhk.cuchat.adapters.ChatListAdapter;
 import edu.cuhk.cuchat.models.ChatListItem;
@@ -44,6 +47,7 @@ public class ChatsFragment extends Fragment {
     private List<ChatListItem> chatList;
     private Map<String, ChatListItem> chatMap;
     private TabLayout tabLayoutChatFilter;
+    private FloatingActionButton fabCreateGroupChat;
 
     private FirebaseAuth mAuth;
     private FirebaseFirestore db;
@@ -51,6 +55,7 @@ public class ChatsFragment extends Fragment {
     private String currentUserId;
     private ListenerRegistration chatListener1;
     private ListenerRegistration chatListener2;
+    private ListenerRegistration groupChatsListener;
     private Map<String, ListenerRegistration> userStatusListeners = new HashMap<>();
 
     private int currentTabPosition = 0;
@@ -100,6 +105,17 @@ public class ChatsFragment extends Fragment {
             // Initialize chat list
             initializeAdapter();
 
+            // Set click listener for create group chat button
+            if (fabCreateGroupChat != null) {
+                fabCreateGroupChat.setOnClickListener(new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        Intent intent = new Intent(getActivity(), GroupCreationActivity.class);
+                        startActivity(intent);
+                    }
+                });
+            }
+
             // Load chats
             loadChats();
         } catch (Exception e) {
@@ -118,6 +134,9 @@ public class ChatsFragment extends Fragment {
 
             // Find tab layout for filtering
             tabLayoutChatFilter = view.findViewById(R.id.tabLayoutChatFilter);
+
+            // Find the create group FAB
+            fabCreateGroupChat = view.findViewById(R.id.fabCreateGroupChat);
 
             if (rvChats == null) {
                 Log.e(TAG, "rvChats view not found");
@@ -190,6 +209,9 @@ public class ChatsFragment extends Fragment {
             if (chatListener2 != null) {
                 chatListener2.remove();
             }
+            if (groupChatsListener != null) {
+                groupChatsListener.remove();
+            }
 
             // Clear existing data
             chatList.clear();
@@ -208,6 +230,14 @@ public class ChatsFragment extends Fragment {
             // Set up the second listener - for chats where current user is user2Id
             chatListener2 = db.collection("chats")
                     .whereEqualTo("user2Id", currentUserId)
+                    .addSnapshotListener((snapshots, error) -> {
+                        handleChatSnapshot(snapshots, error);
+                    });
+
+            // Set up the third listener - for group chats where current user is a participant
+            groupChatsListener = db.collection("chats")
+                    .whereEqualTo("isGroupChat", true)
+                    .whereArrayContains("participants", currentUserId)
                     .addSnapshotListener((snapshots, error) -> {
                         handleChatSnapshot(snapshots, error);
                     });
@@ -234,7 +264,14 @@ public class ChatsFragment extends Fragment {
         for (DocumentChange dc : snapshots.getDocumentChanges()) {
             try {
                 QueryDocumentSnapshot document = dc.getDocument();
-                processChat(document);
+
+                // Check if it's a group chat
+                Boolean isGroupChat = document.getBoolean("isGroupChat");
+                if (Boolean.TRUE.equals(isGroupChat)) {
+                    processGroupChat(document);
+                } else {
+                    processOneToOneChat(document);
+                }
             } catch (Exception e) {
                 Log.e(TAG, "Error processing chat document change", e);
             }
@@ -244,7 +281,66 @@ public class ChatsFragment extends Fragment {
         filterChats();
     }
 
-    private void processChat(QueryDocumentSnapshot document) {
+    private void processGroupChat(QueryDocumentSnapshot document) {
+        try {
+            String chatId = document.getId();
+
+            // Check if current user is a participant
+            List<String> participants = (List<String>) document.get("participants");
+            if (participants == null || !participants.contains(currentUserId)) {
+                return;
+            }
+
+            String groupName = document.getString("groupName");
+            String lastMessage = document.getString("lastMessageContent");
+            Long timestamp = document.getLong("lastMessageTimestamp");
+            if (timestamp == null) timestamp = 0L;
+
+            // Determine if there are unread messages for current user
+            boolean isUnread = false;
+            Map<String, Boolean> seenStatus = (Map<String, Boolean>) document.get("seenStatus");
+            if (seenStatus != null && seenStatus.containsKey(currentUserId)) {
+                isUnread = !Boolean.TRUE.equals(seenStatus.get(currentUserId));
+                // Log the seen status for debugging
+                Log.d(TAG, "Group chat: " + groupName + " seen status for current user: " + !isUnread);
+            } else {
+                Log.d(TAG, "Group chat: " + groupName + " has no seen status for current user");
+                isUnread = true; // Default to unread if no status exists
+            }
+
+            // Create a ChatListItem for the group chat
+            final String groupChatId = chatId;
+            final String finalGroupName = groupName != null ? groupName : "Group Chat";
+            final String finalLastMessage = lastMessage != null ? lastMessage : "";
+            final Long finalTimestamp = timestamp;
+            final boolean finalIsUnread = isUnread;
+            final int participantCount = participants != null ? participants.size() : 0;
+
+            // Create the chat list item for group chat
+            ChatListItem groupChatItem = new ChatListItem(
+                    groupChatId,
+                    "group_" + groupChatId, // Use a prefix to indicate it's a group
+                    finalGroupName,
+                    "", // No profile image for groups yet
+                    finalLastMessage,
+                    finalTimestamp,
+                    finalIsUnread,
+                    false // Default to not online for groups
+            );
+
+            // Set special flag for group chats and participant count
+            groupChatItem.setGroupChat(true);
+            groupChatItem.setGroupParticipants(participantCount);
+            Log.d(TAG, "Group chat item created: " + finalGroupName + " with " + participantCount + " members");
+
+            // Update UI with this chat item
+            addOrUpdateChat(groupChatItem);
+        } catch (Exception e) {
+            Log.e(TAG, "Error processing group chat", e);
+        }
+    }
+
+    private void processOneToOneChat(QueryDocumentSnapshot document) {
         try {
             String chatId = document.getId();
 
@@ -296,7 +392,7 @@ public class ChatsFragment extends Fragment {
                                 String username = userDocument.getString("username");
                                 String profileImageUrl = userDocument.getString("profileImageUrl");
 
-                                // Check if user is online - this is the key change
+                                // Check if user is online
                                 Boolean isOnline = userDocument.getBoolean("isOnline");
                                 boolean userOnlineStatus = isOnline != null && isOnline;
 
@@ -310,7 +406,7 @@ public class ChatsFragment extends Fragment {
                                         finalLastMessage,
                                         finalTimestamp,
                                         finalIsUnread,
-                                        userOnlineStatus  // Pass the actual online status
+                                        userOnlineStatus
                                 );
 
                                 // Debug log for online status
@@ -331,7 +427,7 @@ public class ChatsFragment extends Fragment {
                                     finalLastMessage,
                                     finalTimestamp,
                                     finalIsUnread,
-                                    false  // Default to offline for missing users
+                                    false
                             );
                             addOrUpdateChat(fallbackItem);
                         }
@@ -347,7 +443,7 @@ public class ChatsFragment extends Fragment {
                                 finalLastMessage,
                                 finalTimestamp,
                                 finalIsUnread,
-                                false  // Default to offline for error cases
+                                false
                         );
                         addOrUpdateChat(fallbackItem);
                     });
@@ -489,6 +585,11 @@ public class ChatsFragment extends Fragment {
 
         // Add listeners for each user in the chat list
         for (ChatListItem chat : chatList) {
+            // Skip group chats
+            if (chat.isGroupChat()) {
+                continue;
+            }
+
             String userId = chat.getUserId();
             if (userId != null && !userStatusListeners.containsKey(userId)) {
                 ListenerRegistration listener = db.collection("users").document(userId)
@@ -549,6 +650,10 @@ public class ChatsFragment extends Fragment {
             chatListener2.remove();
             chatListener2 = null;
         }
+        if (groupChatsListener != null) {
+            groupChatsListener.remove();
+            groupChatsListener = null;
+        }
         removeUserStatusListeners(); // Add this
     }
 
@@ -564,6 +669,10 @@ public class ChatsFragment extends Fragment {
             if (chatListener2 != null) {
                 chatListener2.remove();
                 chatListener2 = null;
+            }
+            if (groupChatsListener != null) {
+                groupChatsListener.remove();
+                groupChatsListener = null;
             }
         } catch (Exception e) {
             Log.e(TAG, "Error in onDestroyView", e);
