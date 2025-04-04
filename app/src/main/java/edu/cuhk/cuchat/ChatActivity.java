@@ -151,34 +151,32 @@ public class ChatActivity extends AppCompatActivity {
                 if (snapshot != null && snapshot.exists()) {
                     // Check if user is online
                     Boolean isOnline = snapshot.getBoolean("isOnline");
-                    String status = snapshot.getString("status");
                     Long lastSeen = snapshot.getLong("lastSeen");
 
                     // Update UI with status
-                    updateUserStatusUI(isOnline, status, lastSeen);
+                    updateUserStatusUI(isOnline, lastSeen);
                 }
             }
         });
     }
 
     // Add this method to update the user status UI
-    private void updateUserStatusUI(Boolean isOnline, String status) {
+    private void updateUserStatusUI(Boolean isOnline, Long lastSeen) {
         runOnUiThread(new Runnable() {
             @Override
             public void run() {
                 if (tvUserStatus != null) {
                     if (isOnline != null && isOnline) {
                         tvUserStatus.setText("Online");
-                        // You could change the text color to green to indicate online status
                         tvUserStatus.setTextColor(getResources().getColor(android.R.color.holo_green_dark));
                     } else {
-                        // If user has a status, use it; otherwise show "Offline"
-                        if (status != null && !status.isEmpty()) {
-                            tvUserStatus.setText(status);
+                        // Format last seen time if available
+                        if (lastSeen != null && lastSeen > 0) {
+                            String formattedTime = formatLastSeen(lastSeen);
+                            tvUserStatus.setText("Last seen " + formattedTime);
                         } else {
                             tvUserStatus.setText("Offline");
                         }
-                        // Reset text color
                         tvUserStatus.setTextColor(getResources().getColor(android.R.color.darker_gray));
                     }
                 }
@@ -325,42 +323,6 @@ public class ChatActivity extends AppCompatActivity {
         return super.onOptionsItemSelected(item);
     }
 
-    @Override
-    protected void onPause() {
-        super.onPause();
-        // Update user's online status when leaving chat
-        if (currentUser != null) {
-            db.collection("users").document(currentUserId)
-                    .update("isOnline", false);
-        }
-        updateUserStatus(false);
-    }
-
-    @Override
-    protected void onResume() {
-        super.onResume();
-        // Update user's online status when entering chat
-        if (currentUser != null) {
-            db.collection("users").document(currentUserId)
-                    .update("isOnline", true);
-        }
-
-        // Mark this chat as seen
-        updateChatSeenStatus();
-
-        // Update user status to online
-        updateUserStatus(true);
-    }
-
-    @Override
-    protected void onDestroy() {
-        super.onDestroy();
-        // Remove the user status listener to prevent memory leaks
-        if (userStatusListener != null) {
-            userStatusListener.remove();
-        }
-    }
-
     private void updateChatSeenStatus() {
         db.collection("chats").document(chatId)
                 .get()
@@ -442,6 +404,48 @@ public class ChatActivity extends AppCompatActivity {
             Calendar cal = Calendar.getInstance();
             cal.setTimeInMillis(lastSeen);
             return DateFormat.format("MMM d, yyyy", cal).toString();
+        }
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        updateUserStatus(false);
+    }
+
+    @Override
+    protected void onStop() {
+        super.onStop();
+
+        // Update online status when leaving chat
+        // But only if finishing (actually leaving the activity)
+        if (isFinishing()) {
+            if (currentUser != null) {
+                db.collection("users").document(currentUserId)
+                        .update("isOnline", true);  // Keep as online since app is still running
+            }
+        }
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        // Update user's online status when entering chat
+        if (currentUser != null) {
+            db.collection("users").document(currentUserId)
+                    .update("isOnline", true);
+        }
+
+        // Mark this chat as seen
+        updateChatSeenStatus();
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        // Remove the user status listener to prevent memory leaks
+        if (userStatusListener != null) {
+            userStatusListener.remove();
         }
     }
 

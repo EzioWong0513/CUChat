@@ -20,6 +20,7 @@ import androidx.viewpager2.widget.ViewPager2;
 import com.google.android.material.bottomnavigation.BottomNavigationView;
 import com.google.firebase.auth.FirebaseAuth;
 import com.google.firebase.auth.FirebaseUser;
+import com.google.firebase.database.ServerValue;
 import com.google.firebase.firestore.DocumentChange;
 import com.google.firebase.firestore.FirebaseFirestore;
 
@@ -191,24 +192,54 @@ public class MainActivity extends AppCompatActivity {
     }
 
     @Override
+    protected void onStart() {
+        super.onStart();
+
+        // Update user's online status when app comes to foreground
+        FirebaseUser currentUser = mAuth.getCurrentUser();
+        if (currentUser != null) {
+            UserStatusService.setUserOnline(currentUser);
+        }
+    }
+
+    @Override
     protected void onResume() {
         super.onResume();
         // Update online status
         FirebaseUser currentUser = mAuth.getCurrentUser();
         if (currentUser != null) {
-            db.collection("users").document(currentUser.getUid())
-                    .update("isOnline", true);
+            UserStatusService.setUserOnline(currentUser);
         }
     }
 
     @Override
     protected void onPause() {
         super.onPause();
-        // Update online status
+        // Do not update status to offline in onPause
+        // Only do it in onStop - this keeps the user online
+        // during brief pauses (like rotating the device)
+    }
+
+    @Override
+    protected void onStop() {
+        super.onStop();
+        // Update online status to offline when app goes to background
         FirebaseUser currentUser = mAuth.getCurrentUser();
         if (currentUser != null) {
-            db.collection("users").document(currentUser.getUid())
-                    .update("isOnline", false);
+            // Don't set offline if just changing activities within the app
+            if (isFinishing()) {
+                UserStatusService.setUserOffline(currentUser);
+            }
+        }
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        // Make sure user is marked as offline when app is killed
+        FirebaseUser currentUser = mAuth.getCurrentUser();
+        if (currentUser != null) {
+            UserStatusService.setUserOffline(currentUser);
         }
     }
 }

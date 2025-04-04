@@ -18,6 +18,7 @@ import com.bumptech.glide.Glide;
 import com.google.android.material.textfield.TextInputEditText;
 import com.google.firebase.auth.FirebaseAuth;
 import com.google.firebase.auth.FirebaseUser;
+import com.google.firebase.database.FirebaseDatabase;
 import com.google.firebase.firestore.FirebaseFirestore;
 
 import java.util.HashMap;
@@ -27,6 +28,7 @@ import de.hdodenhof.circleimageview.CircleImageView;
 import edu.cuhk.cuchat.LoginActivity;
 import edu.cuhk.cuchat.R;
 import edu.cuhk.cuchat.models.User;
+import edu.cuhk.cuchat.services.UserStatusService;
 
 public class ProfileFragment extends Fragment {
 
@@ -79,9 +81,7 @@ public class ProfileFragment extends Fragment {
         btnSaveProfile.setOnClickListener(v -> saveProfile());
 
         btnLogout.setOnClickListener(v -> {
-            mAuth.signOut();
-            startActivity(new Intent(getActivity(), LoginActivity.class));
-            getActivity().finish();
+            logoutUser();
         });
     }
 
@@ -174,6 +174,7 @@ public class ProfileFragment extends Fragment {
 
     private void logoutUser() {
         // Mark user as offline in Firestore
+        FirebaseUser currentUser = mAuth.getCurrentUser();
         if (currentUser != null) {
             FirebaseFirestore.getInstance().collection("users")
                     .document(currentUser.getUid())
@@ -187,14 +188,17 @@ public class ProfileFragment extends Fragment {
         }
 
         // Stop the status service
-        stopService(new Intent(this, UserStatusService.class));
+        if (getActivity() != null) {
+            getActivity().stopService(new Intent(getActivity(), UserStatusService.class));
+        }
 
         // Sign out from Firebase
         mAuth.signOut();
 
         // Navigate to login screen
-        startActivity(new Intent(this, LoginActivity.class));
-        finish();
+        startActivity(new Intent(getActivity(), LoginActivity.class));
+        if (getActivity() != null) {
+            getActivity().finish();
+        }
     }
-
 }
