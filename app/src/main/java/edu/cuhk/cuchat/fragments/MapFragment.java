@@ -12,8 +12,10 @@ import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.Button;
 import android.widget.ImageButton;
 import android.widget.LinearLayout;
+import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.annotation.NonNull;
@@ -52,6 +54,10 @@ import java.util.Map;
 import edu.cuhk.cuchat.R;
 import edu.cuhk.cuchat.adapters.NearbyUsersAdapter;
 import edu.cuhk.cuchat.models.User;
+import androidx.cardview.widget.CardView;
+import com.google.android.material.slider.Slider;
+import android.graphics.Color;
+import com.google.android.gms.maps.model.CircleOptions;
 
 public class MapFragment extends Fragment implements OnMapReadyCallback {
 
@@ -86,6 +92,14 @@ public class MapFragment extends Fragment implements OnMapReadyCallback {
     // Store the original and expanded heights for the list
     private float nearbyListExpandedHeight = 0.3f; // 30% of screen height
     private float nearbyListCollapsedHeight = 0.6f; // 60% of screen height
+    private static final double DEFAULT_SEARCH_DISTANCE_KM = 1.0; // Default to 1km
+    private double searchDistanceKm = DEFAULT_SEARCH_DISTANCE_KM;
+
+    private CardView cardRangeSlider;
+    private TextView tvRangeLabel;
+    private Slider sliderRange;
+    private Button btnApplyRange;
+    private FloatingActionButton fabSetRange;
 
     public MapFragment() {
         // Required empty public constructor
@@ -145,14 +159,25 @@ public class MapFragment extends Fragment implements OnMapReadyCallback {
         try {
             fabMyLocation = view.findViewById(R.id.fabMyLocation);
             fabNearbyUsers = view.findViewById(R.id.fabNearbyUsers);
+            fabSetRange = view.findViewById(R.id.fabSetRange);
             llNearbyUsersList = view.findViewById(R.id.llNearbyUsersList);
             rvNearbyUsers = view.findViewById(R.id.rvNearbyUsers);
             btnDismissNearbyUsers = view.findViewById(R.id.btnDismissNearbyUsers);
             rootLayout = view.findViewById(R.id.rootConstraintLayout);
 
+            // Initialize range slider card and components
+            cardRangeSlider = view.findViewById(R.id.cardRangeSlider);
+            tvRangeLabel = view.findViewById(R.id.tvRangeLabel);
+            sliderRange = view.findViewById(R.id.sliderRange);
+            btnApplyRange = view.findViewById(R.id.btnApplyRange);
+
+            // Set initial range label
+            updateRangeLabel(searchDistanceKm);
+
             // Check if views were found
             if (fabMyLocation == null || fabNearbyUsers == null ||
-                    llNearbyUsersList == null || rvNearbyUsers == null) {
+                    llNearbyUsersList == null || rvNearbyUsers == null ||
+                    fabSetRange == null || cardRangeSlider == null) {
                 Log.e(TAG, "One or more views not found in layout");
             }
         } catch (Exception e) {
@@ -183,6 +208,7 @@ public class MapFragment extends Fragment implements OnMapReadyCallback {
 
     private void setClickListeners() {
         try {
+            // Existing click listeners...
             if (fabMyLocation != null) {
                 fabMyLocation.setOnClickListener(v -> {
                     if (lastKnownLocation != null && mMap != null) {
@@ -208,6 +234,52 @@ public class MapFragment extends Fragment implements OnMapReadyCallback {
                 });
             }
 
+            // New click listener for range setting
+            if (fabSetRange != null && cardRangeSlider != null) {
+                fabSetRange.setOnClickListener(v -> {
+                    if (cardRangeSlider.getVisibility() == View.VISIBLE) {
+                        cardRangeSlider.setVisibility(View.GONE);
+                    } else {
+                        // Show the slider card
+                        cardRangeSlider.setVisibility(View.VISIBLE);
+                    }
+                });
+            }
+
+            // Add range slider change listener
+            if (sliderRange != null) {
+                sliderRange.addOnChangeListener((slider, value, fromUser) -> {
+                    if (fromUser) {
+                        updateRangeLabel(value);
+                    }
+                });
+            }
+
+            // Add apply button click listener
+            if (btnApplyRange != null) {
+                btnApplyRange.setOnClickListener(v -> {
+                    // Get the current slider value
+                    searchDistanceKm = sliderRange.getValue();
+
+                    // Update the display
+                    updateRangeLabel(searchDistanceKm);
+
+                    // Hide the slider card
+                    cardRangeSlider.setVisibility(View.GONE);
+
+                    // If the nearby users list is already visible, refresh it with the new range
+                    if (llNearbyUsersList.getVisibility() == View.VISIBLE) {
+                        findNearbyUsers();
+                    } else {
+                        // Show a toast to confirm the range change
+                        Toast.makeText(requireContext(),
+                                "Search range set to " + formatDistance(searchDistanceKm),
+                                Toast.LENGTH_SHORT).show();
+                    }
+                });
+            }
+
+            // Existing click listeners...
             if (btnDismissNearbyUsers != null) {
                 btnDismissNearbyUsers.setOnClickListener(v -> {
                     // Hide the nearby users panel
@@ -237,16 +309,25 @@ public class MapFragment extends Fragment implements OnMapReadyCallback {
                     }
                 });
             }
-
-            // Toggle expand/collapse of nearby users list on title click
-            View tvNearbyUsersTitle = getView().findViewById(R.id.tvNearbyUsersTitle);
-            if (tvNearbyUsersTitle != null) {
-                tvNearbyUsersTitle.setOnClickListener(v -> {
-                    toggleNearbyUsersListSize();
-                });
-            }
         } catch (Exception e) {
             Log.e(TAG, "Error setting click listeners", e);
+        }
+    }
+
+    private void updateRangeLabel(double distanceKm) {
+        if (tvRangeLabel != null) {
+            tvRangeLabel.setText("Search Range: " + formatDistance(distanceKm));
+        }
+    }
+
+    private String formatDistance(double distanceKm) {
+        if (distanceKm < 1.0) {
+            // Display in meters for distances less than 1km
+            int meters = (int) (distanceKm * 1000);
+            return meters + " m";
+        } else {
+            // Display in kilometers with one decimal place
+            return String.format("%.1f km", distanceKm);
         }
     }
 
@@ -441,12 +522,25 @@ public class MapFragment extends Fragment implements OnMapReadyCallback {
 
                 // Center the map on the user's location
                 mMap.animateCamera(CameraUpdateFactory.newLatLngZoom(currentUserLatLng, DEFAULT_ZOOM));
+
+                // Add a circle to show the search radius
+                mMap.addCircle(new CircleOptions()
+                        .center(currentUserLatLng)
+                        .radius(searchDistanceKm * 1000) // Convert km to meters
+                        .strokeColor(Color.argb(100, 0, 0, 255))
+                        .fillColor(Color.argb(30, 0, 0, 255)));
             } else {
                 // Map isn't ready, but we can still search for users and show the list
                 Log.d(TAG, "Map is not ready yet, but still searching for nearby users");
 
                 // Attempt to get the map ready
                 retryGetMapReady();
+            }
+
+            // Show searching message in the title
+            View tvNearbyUsersTitle = getView().findViewById(R.id.tvNearbyUsersTitle);
+            if (tvNearbyUsersTitle instanceof TextView) {
+                ((TextView) tvNearbyUsersTitle).setText("Searching within " + formatDistance(searchDistanceKm) + "...");
             }
 
             // Query Firestore for all users
@@ -458,18 +552,27 @@ public class MapFragment extends Fragment implements OnMapReadyCallback {
 
             db.collection("users")
                     .get()
-                    .addOnSuccessListener(new OnSuccessListener<QuerySnapshot>() {
-                        @Override
-                        public void onSuccess(QuerySnapshot queryDocumentSnapshots) {
-                            processUsersQueryResult(queryDocumentSnapshots);
+                    .addOnSuccessListener(queryDocumentSnapshots -> {
+                        processUsersQueryResult(queryDocumentSnapshots);
+
+                        // Update the title to show found users
+                        if (tvNearbyUsersTitle instanceof TextView) {
+                            if (nearbyUsersList.isEmpty()) {
+                                ((TextView) tvNearbyUsersTitle).setText("No users found within " + formatDistance(searchDistanceKm));
+                            } else {
+                                ((TextView) tvNearbyUsersTitle).setText("Found " + nearbyUsersList.size() +
+                                        " users within " + formatDistance(searchDistanceKm));
+                            }
                         }
                     })
-                    .addOnFailureListener(new OnFailureListener() {
-                        @Override
-                        public void onFailure(@NonNull Exception e) {
-                            Log.w(TAG, "Error finding nearby users", e);
-                            Toast.makeText(requireContext(), "Error finding nearby users", Toast.LENGTH_SHORT).show();
-                            createMockUsersIfNeeded(true);
+                    .addOnFailureListener(e -> {
+                        Log.w(TAG, "Error finding nearby users", e);
+                        Toast.makeText(requireContext(), "Error finding nearby users", Toast.LENGTH_SHORT).show();
+                        createMockUsersIfNeeded(true);
+
+                        // Update title to show error
+                        if (tvNearbyUsersTitle instanceof TextView) {
+                            ((TextView) tvNearbyUsersTitle).setText("Error finding nearby users");
                         }
                     });
         } catch (Exception e) {
@@ -517,8 +620,8 @@ public class MapFragment extends Fragment implements OnMapReadyCallback {
                     float distanceInMeters = lastKnownLocation.distanceTo(userLocation);
                     double distanceInKm = distanceInMeters / 1000.0;
 
-                    // Only show users within the specified distance
-                    if (distanceInKm <= MAX_DISTANCE_KM) {
+                    // Only show users within the specified distance (use the slider value)
+                    if (distanceInKm <= searchDistanceKm) {
                         // Add user to list
                         user.setDistanceInKm(distanceInKm);
                         nearbyUsersList.add(user);
@@ -549,7 +652,7 @@ public class MapFragment extends Fragment implements OnMapReadyCallback {
             }
 
             if (nearbyUsersList.isEmpty()) {
-                Toast.makeText(requireContext(), "No users found nearby", Toast.LENGTH_SHORT).show();
+                Toast.makeText(requireContext(), "No users found within " + formatDistance(searchDistanceKm), Toast.LENGTH_SHORT).show();
             }
 
             // Center map on user's location again after adding markers
@@ -592,15 +695,28 @@ public class MapFragment extends Fragment implements OnMapReadyCallback {
                     mockUser.setUsername("Test User " + i);
                     mockUser.setStatus("This is a test user");
 
-                    // Create a location that's slightly offset from current user
-                    // Each user will be at a different distance
-                    double latOffset = (Math.random() - 0.5) * 0.02; // Random offset within ~1-2km
-                    double lngOffset = (Math.random() - 0.5) * 0.02;
+                    // Calculate a random distance within the specified search range
+                    // (but ensure it's at least 50m away to avoid markers overlapping)
+                    double randomDistanceFactor = Math.random() * 0.95 + 0.05; // 5% to 100% of max distance
+                    double targetDistanceKm = randomDistanceFactor * searchDistanceKm;
 
-                    double mockLat = lastKnownLocation.getLatitude() + latOffset;
-                    double mockLng = lastKnownLocation.getLongitude() + lngOffset;
+                    // Ensure minimum distance of 50m for visibility
+                    targetDistanceKm = Math.max(targetDistanceKm, 0.05);
 
-                    // Calculate distance
+                    // Generate a random angle (0-360 degrees)
+                    double angle = Math.random() * 2 * Math.PI;
+
+                    // Convert the distance and angle to lat/lng offsets
+                    // Approximate conversion: 1 degree latitude = 111km, 1 degree longitude = 111km * cos(latitude)
+                    double currentLat = lastKnownLocation.getLatitude();
+                    double latOffset = targetDistanceKm / 111.0;
+                    double lngOffset = targetDistanceKm / (111.0 * Math.cos(Math.toRadians(currentLat)));
+
+                    // Calculate the new position
+                    double mockLat = currentLat + (latOffset * Math.cos(angle));
+                    double mockLng = lastKnownLocation.getLongitude() + (lngOffset * Math.sin(angle));
+
+                    // Calculate actual distance
                     Location mockLocation = new Location("");
                     mockLocation.setLatitude(mockLat);
                     mockLocation.setLongitude(mockLng);
