@@ -13,6 +13,7 @@ import androidx.recyclerview.widget.RecyclerView;
 import java.util.Calendar;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 import edu.cuhk.cuchat.R;
 import edu.cuhk.cuchat.models.Message;
@@ -24,6 +25,16 @@ public class MessagesAdapter extends RecyclerView.Adapter {
     private Context context;
     private List<Message> messageList;
     private String currentUserId;
+    private Map<String, Boolean> seenBy; // Map of userId -> seen status
+
+    // Add getter and setter for seenBy
+    public Map<String, Boolean> getSeenBy() {
+        return seenBy;
+    }
+
+    public void setSeenBy(Map<String, Boolean> seenBy) {
+        this.seenBy = seenBy;
+    }
 
     public MessagesAdapter(Context context, List<Message> messageList, String currentUserId) {
         this.context = context;

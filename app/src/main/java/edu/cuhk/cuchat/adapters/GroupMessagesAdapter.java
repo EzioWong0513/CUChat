@@ -1,6 +1,7 @@
 package edu.cuhk.cuchat.adapters;
 
 import android.content.Context;
+import android.graphics.Color;
 import android.text.format.DateFormat;
 import android.util.Log;
 import android.view.LayoutInflater;
@@ -130,26 +131,49 @@ public class GroupMessagesAdapter extends RecyclerView.Adapter {
     }
 
     private class SentMessageHolder extends RecyclerView.ViewHolder {
-        TextView messageText, timeText;
+        TextView messageText, timeText, statusText;
 
         SentMessageHolder(View itemView) {
             super(itemView);
 
             messageText = itemView.findViewById(R.id.tvMessage);
             timeText = itemView.findViewById(R.id.tvTimestamp);
+            statusText = itemView.findViewById(R.id.tvMessageStatus); // Add this TextView to your item_message_sent.xml
         }
 
         void bind(Message message) {
             try {
-                String content = message.getContent();
-                if (content != null) {
-                    messageText.setText(content);
-                } else {
-                    messageText.setText("");
-                }
+                messageText.setText(message.getContent());
+                timeText.setText(formatTime(message.getTimestamp()));
 
-                long timestamp = message.getTimestamp();
-                timeText.setText(formatTime(timestamp));
+                // Handle seen/delivered status
+                if (statusText != null) {
+                    Map<String, Boolean> seenBy = message.getSeenBy();
+                    if (seenBy != null && !seenBy.isEmpty()) {
+                        // Count how many people have seen the message (excluding sender)
+                        int seenCount = 0;
+                        for (Map.Entry<String, Boolean> entry : seenBy.entrySet()) {
+                            if (!entry.getKey().equals(currentUserId) && Boolean.TRUE.equals(entry.getValue())) {
+                                seenCount++;
+                            }
+                        }
+
+                        if (seenCount > 0) {
+                            // At least one person has seen it
+                            statusText.setText("Seen");
+                            statusText.setTextColor(context.getResources().getColor(R.color.purple_500));
+                        } else {
+                            // No one has seen it yet
+                            statusText.setText("Delivered");
+                            statusText.setTextColor(Color.GRAY);
+                        }
+                        statusText.setVisibility(View.VISIBLE);
+                    } else {
+                        statusText.setText("Sent");
+                        statusText.setTextColor(Color.GRAY);
+                        statusText.setVisibility(View.VISIBLE);
+                    }
+                }
             } catch (Exception e) {
                 Log.e("GroupMessagesAdapter", "Error binding sent message", e);
             }

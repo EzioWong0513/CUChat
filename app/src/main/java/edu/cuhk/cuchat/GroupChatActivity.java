@@ -41,6 +41,16 @@ import java.util.Map;
 
 import edu.cuhk.cuchat.adapters.GroupMessagesAdapter;
 import edu.cuhk.cuchat.models.Message;
+import android.app.AlertDialog;
+import android.content.DialogInterface;
+import android.view.Menu;
+import android.view.MenuInflater;
+import android.widget.Toast;
+import com.google.android.gms.tasks.OnSuccessListener;
+import com.google.android.gms.tasks.Task;
+import com.google.android.gms.tasks.Tasks;
+import com.google.firebase.firestore.CollectionReference;
+import com.google.firebase.firestore.DocumentReference;
 
 public class GroupChatActivity extends AppCompatActivity {
 
@@ -89,6 +99,9 @@ public class GroupChatActivity extends AppCompatActivity {
         currentUser = mAuth.getCurrentUser();
         currentUserId = currentUser.getUid();
 
+        // Initialize participants list
+        participants = new ArrayList<>();
+
         // Initialize UI components
         toolbar = findViewById(R.id.toolbar);
         setSupportActionBar(toolbar);
@@ -105,139 +118,224 @@ public class GroupChatActivity extends AppCompatActivity {
         // Set group name in toolbar
         if (groupName != null) {
             tvGroupName.setText(groupName);
-        } else {
-            // If group name is not provided, fetch it from Firestore
-            loadGroupInfo();
         }
+
+        // Initialize with a loading state
+        tvParticipantsCount.setText("Loading members...");
+        tvParticipantsCount.setVisibility(View.VISIBLE);
 
         // Initialize RecyclerView
         messageList = new ArrayList<>();
         messagesAdapter = new GroupMessagesAdapter(this, messageList, currentUserId);
-        rvMessages.setLayoutManager(new LinearLayoutManager(this));
+
+        LinearLayoutManager layoutManager = new LinearLayoutManager(this);
+        rvMessages.setLayoutManager(layoutManager);
         rvMessages.setAdapter(messagesAdapter);
 
         // Set click listener for send button
-        btnSendMessage.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                sendMessage();
-            }
-        });
+        btnSendMessage.setOnClickListener(v -> sendMessage());
 
         // Set click listener for group info button
-        ivGroupInfo.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                showGroupInfoDialog();
-            }
-        });
+        ivGroupInfo.setOnClickListener(v -> showGroupInfoDialog());
 
-        // Load messages
+        // First, load group info (name, participants)
+        loadGroupInfo();
+
+        // Then load messages
         loadMessages();
 
-        // Update the group's seen status for the current user
+        // Mark messages as seen when entering the chat
         updateGroupSeenStatus();
     }
 
     private void loadGroupInfo() {
-        groupInfoListener = db.collection("chats").document(chatId)
-                .addSnapshotListener(new EventListener<DocumentSnapshot>() {
-                    @Override
-                    public void onEvent(@Nullable DocumentSnapshot snapshot, @Nullable FirebaseFirestoreException e) {
+        try {
+            // Add direct debug logging
+            Log.d(TAG, "loadGroupInfo called for chatId: " + chatId);
+
+            if (chatId == null) {
+                Log.e(TAG, "chatId is null in loadGroupInfo");
+                return;
+            }
+
+            groupInfoListener = db.collection("chats").document(chatId)
+                    .addSnapshotListener((snapshot, e) -> {
                         if (e != null) {
-                            Log.w(TAG, "Listen failed.", e);
+                            Log.e(TAG, "Listen failed in loadGroupInfo", e);
                             return;
                         }
 
-                        if (snapshot != null && snapshot.exists()) {
-                            // Get group name
-                            groupName = snapshot.getString("groupName");
-                            if (groupName != null) {
-                                tvGroupName.setText(groupName);
-                            }
-
-                            // Get participants list - fixed to correctly retrieve participants array
-                            try {
-                                participants = (List<String>) snapshot.get("participants");
-                                if (participants != null) {
-                                    // Update the participant count text
-                                    int memberCount = participants.size();
-                                    tvParticipantsCount.setText(memberCount + " members");
-
-                                    // Make sure the UI is updated on the main thread
-                                    runOnUiThread(() -> {
-                                        tvParticipantsCount.setVisibility(View.VISIBLE);
-                                    });
-
-                                    Log.d(TAG, "Loaded " + memberCount + " group members");
-                                } else {
-                                    Log.w(TAG, "No participants found in group chat");
-                                    tvParticipantsCount.setText("0 members");
-                                }
-                            } catch (Exception ex) {
-                                Log.e(TAG, "Error loading participants", ex);
-                                tvParticipantsCount.setText("? members");
-                            }
+                        if (snapshot == null) {
+                            Log.e(TAG, "Snapshot is null in loadGroupInfo");
+                            return;
                         }
-                    }
-                });
+
+                        if (!snapshot.exists()) {
+                            Log.e(TAG, "Document doesn't exist for chatId: " + chatId);
+                            return;
+                        }
+
+                        // Get group name
+                        String groupNameFromDb = snapshot.getString("groupName");
+                        if (groupNameFromDb != null) {
+                            groupName = groupNameFromDb;
+                            tvGroupName.setText(groupName);
+                            Log.d(TAG, "Group name loaded: " + groupName);
+                        } else {
+                            Log.w(TAG, "Group name is null in document");
+                        }
+
+                        // Get participants list
+                        try {
+                            // Explicitly log all fields in the document for debugging
+                            Map<String, Object> data = snapshot.getData();
+                            if (data != null) {
+                                Log.d(TAG, "Document data: " + data.toString());
+                            }
+
+                            // Try to get participants in different ways
+                            Object participantsObj = snapshot.get("participants");
+                            Log.d(TAG, "Participants object type: " +
+                                    (participantsObj != null ? participantsObj.getClass().getName() : "null"));
+
+                            if (participantsObj instanceof List) {
+                                List<String> participantsList = (List<String>) participantsObj;
+                                participants = participantsList;
+
+                                int memberCount = participantsList.size();
+                                Log.d(TAG, "Participant count: " + memberCount);
+
+                                // Update the participant count text
+                                if (memberCount > 0) {
+                                    String memberText = memberCount + " member" + (memberCount > 1 ? "s" : "");
+                                    tvParticipantsCount.setText(memberText);
+                                    tvParticipantsCount.setVisibility(View.VISIBLE);
+                                    Log.d(TAG, "Setting participant count text: " + memberText);
+                                } else {
+                                    tvParticipantsCount.setText("No members");
+                                    tvParticipantsCount.setVisibility(View.VISIBLE);
+                                    Log.w(TAG, "No participants found in list");
+                                }
+                            } else {
+                                Log.e(TAG, "Participants field is not a List");
+                                tvParticipantsCount.setText("Error loading members");
+                                tvParticipantsCount.setVisibility(View.VISIBLE);
+                            }
+                        } catch (Exception ex) {
+                            Log.e(TAG, "Error processing participants", ex);
+                            tvParticipantsCount.setText("Error loading members");
+                            tvParticipantsCount.setVisibility(View.VISIBLE);
+                        }
+                    });
+        } catch (Exception e) {
+            Log.e(TAG, "Exception in loadGroupInfo", e);
+        }
     }
 
     private void loadMessages() {
         try {
+            Log.d(TAG, "loadMessages called for chatId: " + chatId);
+
+            if (chatId == null) {
+                Log.e(TAG, "chatId is null in loadMessages");
+                return;
+            }
+
+            // Remove previous listener if exists
+            if (messagesListener != null) {
+                messagesListener.remove();
+            }
+
+            // Clear the current message list
+            messageList.clear();
+            if (messagesAdapter != null) {
+                messagesAdapter.notifyDataSetChanged();
+            }
+
+            // Set up real-time listener for messages
             messagesListener = db.collection("chats").document(chatId).collection("messages")
                     .orderBy("timestamp", Query.Direction.ASCENDING)
-                    .addSnapshotListener(new EventListener<QuerySnapshot>() {
-                        @Override
-                        public void onEvent(@Nullable QuerySnapshot value, @Nullable FirebaseFirestoreException error) {
-                            if (error != null) {
-                                Log.w(TAG, "Listen failed.", error);
-                                return;
-                            }
+                    .addSnapshotListener((value, error) -> {
+                        if (error != null) {
+                            Log.e(TAG, "Listen failed in loadMessages", error);
+                            return;
+                        }
 
-                            if (value == null) {
-                                return;
-                            }
+                        if (value == null) {
+                            Log.e(TAG, "QuerySnapshot is null in loadMessages");
+                            return;
+                        }
 
-                            try {
-                                for (DocumentChange dc : value.getDocumentChanges()) {
-                                    switch (dc.getType()) {
-                                        case ADDED:
-                                            try {
-                                                Message message = dc.getDocument().toObject(Message.class);
+                        try {
+                            for (DocumentChange dc : value.getDocumentChanges()) {
+                                switch (dc.getType()) {
+                                    case ADDED:
+                                        try {
+                                            // Add new message
+                                            Message message = dc.getDocument().toObject(Message.class);
+                                            message.setMessageId(dc.getDocument().getId());
+                                            messageList.add(message);
+                                            Log.d(TAG, "Message added: " + message.getContent());
+                                        } catch (Exception e) {
+                                            Log.e(TAG, "Error adding message", e);
+                                        }
+                                        break;
 
-                                                // Make sure all critical fields are set
-                                                ensureMessageFields(message, dc.getDocument());
+                                    case MODIFIED:
+                                        try {
+                                            // Handle message modification
+                                            String modifiedId = dc.getDocument().getId();
+                                            Message updatedMessage = dc.getDocument().toObject(Message.class);
+                                            updatedMessage.setMessageId(modifiedId);
 
-                                                messageList.add(message);
-                                            } catch (Exception e) {
-                                                Log.e(TAG, "Error processing message", e);
+                                            // Find and replace the message in our list
+                                            for (int i = 0; i < messageList.size(); i++) {
+                                                if (messageList.get(i).getMessageId().equals(modifiedId)) {
+                                                    messageList.set(i, updatedMessage);
+                                                    Log.d(TAG, "Message updated: " + modifiedId);
+                                                    break;
+                                                }
                                             }
-                                            break;
-                                        case MODIFIED:
-                                            // Handle modified messages if needed
-                                            break;
-                                        case REMOVED:
-                                            // Handle removed messages if needed
-                                            break;
-                                    }
+                                        } catch (Exception e) {
+                                            Log.e(TAG, "Error updating message", e);
+                                        }
+                                        break;
+
+                                    case REMOVED:
+                                        try {
+                                            // Handle message removal
+                                            String removedId = dc.getDocument().getId();
+                                            for (int i = 0; i < messageList.size(); i++) {
+                                                if (messageList.get(i).getMessageId().equals(removedId)) {
+                                                    messageList.remove(i);
+                                                    Log.d(TAG, "Message removed: " + removedId);
+                                                    break;
+                                                }
+                                            }
+                                        } catch (Exception e) {
+                                            Log.e(TAG, "Error removing message", e);
+                                        }
+                                        break;
                                 }
-
-                                messagesAdapter.notifyDataSetChanged();
-                                if (messageList.size() > 0) {
-                                    rvMessages.scrollToPosition(messageList.size() - 1);
-                                }
-
-                                // Mark messages as seen
-                                updateGroupSeenStatus();
-
-                            } catch (Exception e) {
-                                Log.e(TAG, "Error processing message changes", e);
                             }
+
+                            // Update the adapter
+                            messagesAdapter.notifyDataSetChanged();
+
+                            // Scroll to bottom if we have messages
+                            if (messageList.size() > 0) {
+                                rvMessages.scrollToPosition(messageList.size() - 1);
+                            }
+
+                            // Update seen status for all messages
+                            updateGroupSeenStatus();
+
+                        } catch (Exception e) {
+                            Log.e(TAG, "Error processing message changes", e);
                         }
                     });
         } catch (Exception e) {
-            Log.e(TAG, "Error setting up messages listener", e);
+            Log.e(TAG, "Exception in loadMessages", e);
         }
     }
 
@@ -283,41 +381,93 @@ public class GroupChatActivity extends AppCompatActivity {
             return;
         }
 
-        long timestamp = System.currentTimeMillis();
-
-        // Create a new message with all required fields properly initialized
-        Map<String, Object> messageMap = new HashMap<>();
-        messageMap.put("senderId", currentUserId);
-        messageMap.put("receiverId", ""); // For group chats, we don't have a specific receiver
-        messageMap.put("content", messageContent);
-        messageMap.put("timestamp", timestamp);
-        messageMap.put("seen", false);
-        messageMap.put("isSystemMessage", false); // Make sure this field is always set
-
-        // Show progress indicator or disable send button temporarily
+        // Temporarily disable the send button to prevent duplicate messages
         btnSendMessage.setEnabled(false);
 
-        // Add message to the chat
-        db.collection("chats").document(chatId).collection("messages")
-                .add(messageMap)
-                .addOnSuccessListener(documentReference -> {
-                    Log.d(TAG, "Message sent with ID: " + documentReference.getId());
-                    etMessage.setText("");
-                    btnSendMessage.setEnabled(true);
+        long timestamp = System.currentTimeMillis();
 
-                    // Update chat summary with proper error handling
-                    try {
+        try {
+            // Get current participants list if needed
+            if (participants == null || participants.isEmpty()) {
+                // Load participants from Firestore if we don't have them
+                db.collection("chats").document(chatId)
+                        .get()
+                        .addOnSuccessListener(documentSnapshot -> {
+                            if (documentSnapshot.exists()) {
+                                List<String> loadedParticipants = (List<String>) documentSnapshot.get("participants");
+                                if (loadedParticipants != null && !loadedParticipants.isEmpty()) {
+                                    participants = loadedParticipants;
+                                    Log.d(TAG, "Loaded " + participants.size() + " participants before sending message");
+                                    // Now that we have participants, proceed with sending
+                                    sendMessageWithParticipants(messageContent, timestamp);
+                                } else {
+                                    // Fall back to just adding the current user
+                                    participants = new ArrayList<>();
+                                    participants.add(currentUserId);
+                                    Log.w(TAG, "Could not load participants, using only current user");
+                                    sendMessageWithParticipants(messageContent, timestamp);
+                                }
+                            } else {
+                                Log.e(TAG, "Chat document not found");
+                                btnSendMessage.setEnabled(true);
+                            }
+                        })
+                        .addOnFailureListener(e -> {
+                            Log.e(TAG, "Error loading participants", e);
+                            btnSendMessage.setEnabled(true);
+                        });
+            } else {
+                // We already have participants, proceed with sending
+                sendMessageWithParticipants(messageContent, timestamp);
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error in sendMessage", e);
+            btnSendMessage.setEnabled(true);
+            Toast.makeText(this, "Error sending message", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void sendMessageWithParticipants(String messageContent, long timestamp) {
+        try {
+            // Create a new message
+            Map<String, Object> messageMap = new HashMap<>();
+            messageMap.put("senderId", currentUserId);
+            messageMap.put("content", messageContent);
+            messageMap.put("timestamp", timestamp);
+            messageMap.put("seen", false); // Legacy field, keeping for compatibility
+            messageMap.put("isSystemMessage", false);
+
+            // Create the seenBy map for participants
+            Map<String, Boolean> seenByMap = new HashMap<>();
+            for (String participantId : participants) {
+                // Only the sender has seen the message initially
+                seenByMap.put(participantId, participantId.equals(currentUserId));
+            }
+            messageMap.put("seenBy", seenByMap);
+
+            Log.d(TAG, "Sending message with " + participants.size() + " participants in seenBy");
+
+            // Add message to the chat
+            db.collection("chats").document(chatId).collection("messages")
+                    .add(messageMap)
+                    .addOnSuccessListener(documentReference -> {
+                        Log.d(TAG, "Message sent with ID: " + documentReference.getId());
+                        etMessage.setText("");
+                        btnSendMessage.setEnabled(true);
+
+                        // Update chat summary
                         updateGroupChatSummary(messageContent, timestamp);
-                    } catch (Exception e) {
-                        Log.e(TAG, "Error updating group chat summary", e);
-                        // Don't let this crash the app
-                    }
-                })
-                .addOnFailureListener(e -> {
-                    Log.w(TAG, "Error sending message", e);
-                    Toast.makeText(GroupChatActivity.this, "Failed to send message", Toast.LENGTH_SHORT).show();
-                    btnSendMessage.setEnabled(true);
-                });
+                    })
+                    .addOnFailureListener(e -> {
+                        Log.e(TAG, "Error sending message", e);
+                        btnSendMessage.setEnabled(true);
+                        Toast.makeText(GroupChatActivity.this, "Failed to send message", Toast.LENGTH_SHORT).show();
+                    });
+        } catch (Exception e) {
+            Log.e(TAG, "Error in sendMessageWithParticipants", e);
+            btnSendMessage.setEnabled(true);
+            Toast.makeText(this, "Error preparing message", Toast.LENGTH_SHORT).show();
+        }
     }
 
     private void updateGroupChatSummary(String lastMessage, long timestamp) {
@@ -393,84 +543,214 @@ public class GroupChatActivity extends AppCompatActivity {
     private void updateGroupSeenStatus() {
         try {
             if (chatId == null || currentUserId == null) {
-                Log.w(TAG, "Cannot update seen status: chatId or currentUserId is null");
+                Log.e(TAG, "Cannot update seen status: chatId or currentUserId is null");
                 return;
             }
 
-            // Reference to the chat document
-            DocumentReference chatRef = db.collection("chats").document(chatId);
+            Log.d(TAG, "updateGroupSeenStatus called for user: " + currentUserId);
 
-            // First fetch the current seenStatus map
+            // First update the main chat document seenStatus
+            DocumentReference chatRef = db.collection("chats").document(chatId);
             chatRef.get().addOnSuccessListener(documentSnapshot -> {
                 if (documentSnapshot.exists()) {
                     try {
-                        // Get the current seenStatus map or create a new one if it doesn't exist
-                        Map<String, Boolean> seenStatus = (Map<String, Boolean>) documentSnapshot.get("seenStatus");
-                        if (seenStatus == null) {
-                            // If no seenStatus exists, create a new one
-                            seenStatus = new HashMap<>();
+                        // Update the seenStatus map
+                        Map<String, Object> updates = new HashMap<>();
 
-                            // Get participants to initialize seenStatus for every member
-                            List<String> members = (List<String>) documentSnapshot.get("participants");
-                            if (members != null) {
-                                for (String member : members) {
-                                    // Only current user has seen the messages
-                                    seenStatus.put(member, member.equals(currentUserId));
-                                }
-                            } else {
-                                // If no participants, at least mark current user
-                                seenStatus.put(currentUserId, true);
-                            }
+                        // Get or create seenStatus map
+                        Map<String, Boolean> seenStatus;
+                        Object existingSeenStatus = documentSnapshot.get("seenStatus");
+
+                        if (existingSeenStatus instanceof Map) {
+                            seenStatus = (Map<String, Boolean>) existingSeenStatus;
                         } else {
-                            // Update just the current user's status
-                            seenStatus.put(currentUserId, true);
+                            seenStatus = new HashMap<>();
                         }
 
-                        // Create a field update to set the current user's seen status to true
-                        Map<String, Object> updates = new HashMap<>();
+                        // Update current user's status
+                        seenStatus.put(currentUserId, true);
                         updates.put("seenStatus", seenStatus);
 
                         // Update the document
                         chatRef.update(updates)
-                                .addOnSuccessListener(aVoid -> Log.d(TAG, "Group seen status updated for user " + currentUserId))
-                                .addOnFailureListener(e -> Log.w(TAG, "Error updating group seen status", e));
+                                .addOnSuccessListener(aVoid ->
+                                        Log.d(TAG, "Chat seenStatus updated for user: " + currentUserId))
+                                .addOnFailureListener(e ->
+                                        Log.e(TAG, "Error updating chat seenStatus", e));
 
                     } catch (Exception e) {
-                        Log.e(TAG, "Error processing seenStatus", e);
+                        Log.e(TAG, "Error processing chat seenStatus", e);
                     }
+                } else {
+                    Log.e(TAG, "Chat document not found");
                 }
             }).addOnFailureListener(e -> Log.e(TAG, "Error fetching chat document", e));
 
-            // Additionally, mark all messages as seen
-            db.collection("chats").document(chatId)
-                    .collection("messages")
-                    .whereEqualTo("seen", false)
+            // Now update all message seenBy fields
+            // Instead of using a transaction (which was causing the error),
+            // first get all messages and then batch update them
+            db.collection("chats").document(chatId).collection("messages")
                     .get()
-                    .addOnSuccessListener(queryDocumentSnapshots -> {
+                    .addOnSuccessListener(messagesSnapshot -> {
+                        // Create a batch for all updates
                         WriteBatch batch = db.batch();
                         boolean hasPendingWrites = false;
 
-                        for (DocumentSnapshot doc : queryDocumentSnapshots.getDocuments()) {
-                            // Update each message
-                            batch.update(doc.getReference(), "seen", true);
-                            hasPendingWrites = true;
+                        for (DocumentSnapshot doc : messagesSnapshot.getDocuments()) {
+                            try {
+                                Message message = doc.toObject(Message.class);
+                                if (message != null) {
+                                    // Get or create the seenBy map
+                                    Map<String, Boolean> seenBy = message.getSeenBy();
+                                    if (seenBy == null) {
+                                        seenBy = new HashMap<>();
+                                    }
+
+                                    // Only update if not already set to true
+                                    if (!Boolean.TRUE.equals(seenBy.get(currentUserId))) {
+                                        seenBy.put(currentUserId, true);
+
+                                        // Add to the batch
+                                        batch.update(doc.getReference(), "seenBy", seenBy);
+                                        hasPendingWrites = true;
+                                        Log.d(TAG, "Adding seenBy update for message: " + message.getMessageId());
+                                    }
+                                }
+                            } catch (Exception e) {
+                                Log.e(TAG, "Error processing message for seenBy update", e);
+                            }
                         }
 
+                        // Only commit if we have changes
                         if (hasPendingWrites) {
                             batch.commit()
-                                    .addOnSuccessListener(aVoid -> Log.d(TAG, "Marked messages as seen"))
-                                    .addOnFailureListener(e -> Log.e(TAG, "Error marking messages as seen", e));
+                                    .addOnSuccessListener(aVoid -> {
+                                        Log.d(TAG, "Batch update success - updated message seenBy fields");
+                                        // Refresh UI
+                                        messagesAdapter.notifyDataSetChanged();
+                                    })
+                                    .addOnFailureListener(e ->
+                                            Log.e(TAG, "Batch update failed - could not update message seenBy fields", e));
+                        } else {
+                            Log.d(TAG, "No seenBy updates needed");
                         }
-                    });
+                    })
+                    .addOnFailureListener(e -> Log.e(TAG, "Error fetching messages for seenBy update", e));
         } catch (Exception e) {
-            Log.e(TAG, "Error in updateGroupSeenStatus", e);
+            Log.e(TAG, "Exception in updateGroupSeenStatus", e);
         }
     }
 
     private void showGroupInfoDialog() {
-        // Here you would implement the group info dialog
-        // This could show all members, allow adding new members, etc.
-        Toast.makeText(this, "Group info not implemented yet", Toast.LENGTH_SHORT).show();
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle(groupName);
+
+        // Create message with participants count
+        String message = "";
+        if (participants != null) {
+            message = participants.size() + " members in this group";
+        }
+        builder.setMessage(message);
+
+        // Only show delete button if user is the group creator
+        db.collection("chats").document(chatId)
+                .get()
+                .addOnSuccessListener(documentSnapshot -> {
+                    if (documentSnapshot.exists()) {
+                        String createdBy = documentSnapshot.getString("createdBy");
+
+                        // Dialog actions
+                        builder.setPositiveButton("OK", (dialog, which) -> dialog.dismiss());
+
+                        // Only show delete option if user is the creator
+                        if (currentUserId.equals(createdBy)) {
+                            builder.setNegativeButton("Delete Group", (dialog, which) -> {
+                                // Confirm deletion
+                                showDeleteConfirmationDialog();
+                            });
+                        }
+
+                        // Show the dialog
+                        AlertDialog dialog = builder.create();
+                        dialog.show();
+                    }
+                })
+                .addOnFailureListener(e -> {
+                    // Show dialog without delete option if there's an error
+                    builder.setPositiveButton("OK", (dialog, which) -> dialog.dismiss());
+                    AlertDialog dialog = builder.create();
+                    dialog.show();
+                });
+    }
+
+    private void showDeleteConfirmationDialog() {
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle("Delete Group");
+        builder.setMessage("Are you sure you want to delete this group? This action cannot be undone.");
+        builder.setPositiveButton("Delete", (dialog, which) -> {
+            deleteGroup();
+        });
+        builder.setNegativeButton("Cancel", (dialog, which) -> dialog.dismiss());
+        AlertDialog dialog = builder.create();
+        dialog.show();
+    }
+
+    private void deleteGroup() {
+        if (chatId == null) {
+            Toast.makeText(this, "Error: Chat ID is missing", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        // Show a progress dialog
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setMessage("Deleting group...");
+        builder.setCancelable(false);
+        AlertDialog progressDialog = builder.create();
+        progressDialog.show();
+
+        try {
+            // 1. Get a reference to the messages collection
+            CollectionReference messagesRef = db.collection("chats").document(chatId).collection("messages");
+
+            // 2. Get all messages in the group
+            messagesRef.get().addOnSuccessListener(querySnapshot -> {
+                // Use a batch to delete all messages
+                WriteBatch batch = db.batch();
+
+                // Add each message document to the batch
+                querySnapshot.getDocuments().forEach(doc -> {
+                    batch.delete(doc.getReference());
+                });
+
+                // Execute the batch
+                batch.commit().addOnSuccessListener(aVoid -> {
+                    // 3. Now that all messages are deleted, delete the group chat document
+                    db.collection("chats").document(chatId).delete()
+                            .addOnSuccessListener(aVoid2 -> {
+                                progressDialog.dismiss();
+                                Toast.makeText(GroupChatActivity.this, "Group deleted successfully", Toast.LENGTH_SHORT).show();
+                                finish(); // Close the activity
+                            })
+                            .addOnFailureListener(e -> {
+                                progressDialog.dismiss();
+                                Log.e(TAG, "Error deleting group document", e);
+                                Toast.makeText(GroupChatActivity.this, "Error deleting group", Toast.LENGTH_SHORT).show();
+                            });
+                }).addOnFailureListener(e -> {
+                    progressDialog.dismiss();
+                    Log.e(TAG, "Error deleting messages", e);
+                    Toast.makeText(GroupChatActivity.this, "Error deleting group messages", Toast.LENGTH_SHORT).show();
+                });
+            }).addOnFailureListener(e -> {
+                progressDialog.dismiss();
+                Log.e(TAG, "Error getting messages", e);
+                Toast.makeText(GroupChatActivity.this, "Error accessing group messages", Toast.LENGTH_SHORT).show();
+            });
+        } catch (Exception e) {
+            progressDialog.dismiss();
+            Log.e(TAG, "Error in deleteGroup", e);
+            Toast.makeText(this, "Error deleting group", Toast.LENGTH_SHORT).show();
+        }
     }
 
     @Override

@@ -1,5 +1,7 @@
 package edu.cuhk.cuchat.models;
 
+import java.util.Map;
+
 public class Message {
     private String messageId;
     private String senderId;
@@ -8,6 +10,7 @@ public class Message {
     private long timestamp;
     private boolean seen;
     private boolean isSystemMessage;
+    private Map<String, Boolean> seenBy; // Map of userId -> seen status
 
     // Empty constructor for Firestore
     public Message() {
@@ -78,5 +81,14 @@ public class Message {
 
     public void setSystemMessage(boolean systemMessage) {
         isSystemMessage = systemMessage;
+    }
+
+    // Add getter and setter for seenBy
+    public Map<String, Boolean> getSeenBy() {
+        return seenBy;
+    }
+
+    public void setSeenBy(Map<String, Boolean> seenBy) {
+        this.seenBy = seenBy;
     }
 }
